@@ -1,0 +1,976 @@
+/**
+ * 离线集成测试：node tools/test/integration.js
+ *
+ * 两件事：
+ *  A. 用本地 mock 的 wx-server-sdk 真跑云函数，走完整业务流程
+ *     （初始化 → 导菜 → 上下架 → 限量 → 下单 → 改单 → 汇总 → 截止 → 撤单）
+ *  B. 在 mock 的 wx/Page 环境下加载 4 个页面，并直接验证前端纯逻辑
+ *     （购物车计算、点单明细、看板复制文本、分组统计）
+ *
+ * 退出码非 0 表示有失败项。
+ */
+const path = require('path');
+const Module = require('module');
+
+const { createMockCloud, createState } = require('./mock-wx-server-sdk.js');
+
+const ROOT = path.resolve(__dirname, '..', '..');
+const state = createState();
+
+// 拦截 wx-server-sdk
+const originalLoad = Module._load;
+Module._load = function (request, parent, isMain) {
+  if (request === 'wx-server-sdk') return createMockCloud(state);
+  return originalLoad.apply(this, arguments);
+};
+
+const cloudApi = require(path.join(ROOT, 'cloudfunctions', 'api', 'index.js'));
+const SEED = require(path.join(ROOT, 'miniprogram', 'data', 'dishes.seed.js'));
+
+/* ------------------------- 断言工具 ------------------------- */
+
+let pass = 0;
+let fail = 0;
+const failures = [];
+
+function ok(name, extra) {
+  pass += 1;
+  console.log('  PASS  ' + name + (extra ? '  → ' + extra : ''));
+}
+
+function bad(name, extra) {
+  fail += 1;
+  failures.push(name + (extra ? ' → ' + extra : ''));
+  console.log('  FAIL  ' + name + (extra ? '  → ' + extra : ''));
+}
+
+function expect(name, cond, extra) {
+  if (cond) ok(name, extra);
+  else bad(name, extra);
+}
+
+/* ------------------------- 场景 ------------------------- */
+
+const HOST = 'openid_host';
+const WIFE = 'openid_wife';
+const GUEST_B = 'openid_guest_b';
+const GUEST_C = 'openid_guest_c';
+
+async function call(action, data, openid) {
+  state.openid = openid || HOST;
+  return cloudApi.main(Object.assign({ action: action }, data || {}));
+}
+
+async function runBackend() {
+  console.log('\n[A] 云函数端到端');
+
+  /* --- 初始化 --- */
+  let r = await call('whoami', {}, GUEST_B);
+  expect('未初始化时 whoami → inited=false', r.ok && r.data.inited === false);
+  expect('未初始化时 config 为空', r.ok && r.data.config === null);
+
+  r = await call('init', {}, HOST);
+  expect('主人 init → isAdmin=true', r.ok && r.data.isAdmin === true);
+  const hostCode = r.ok && r.data.config ? r.data.config.hostCode : '';
+  expect('init 自动生成 4 位主人口令', /^\d{4}$/.test(String(hostCode)), '口令=' + hostCode);
+  expect('init 自动建了 3 个集合', Object.keys(state.collections).sort().join(',') === 'config,dishes,orders',
+    '实际=' + Object.keys(state.collections).sort().join(','));
+
+  r = await call('whoami', {}, GUEST_B);
+  expect('朋友 whoami → inited=true / isAdmin=false', r.ok && r.data.inited === true && r.data.isAdmin === false);
+  expect('朋友看不到主人口令', r.ok && r.data.config && r.data.config.hostCode === undefined);
+
+  r = await call('init', { hostCode: '0000' }, GUEST_C);
+  expect('错误口令 init 被拒绝', r.ok === false, r.msg);
+  r = await call('init', { hostCode: hostCode }, WIFE);
+  expect('正确口令 init → 成为第二个主人', r.ok && r.data.isAdmin === true);
+
+  /* --- 空菜库 --- */
+  r = await call('listDishes', {}, GUEST_B);
+  expect('空菜库时 listDishes 返回空数组', r.ok && Array.isArray(r.data.dishes) && r.data.dishes.length === 0);
+
+  /* --- 导入菜库 --- */
+  r = await call('seedDishes', { dishes: SEED }, GUEST_C);
+  expect('非管理员不能导入菜库', r.ok === false, r.msg);
+
+  r = await call('seedDishes', { dishes: SEED }, HOST);
+  expect('导入内置菜库 → 新增 ' + SEED.length + ' 道', r.ok && r.data.added === SEED.length, JSON.stringify(r.data));
+
+  r = await call('seedDishes', { dishes: SEED }, HOST);
+  expect('重复导入不产生重复数据', r.ok && r.data.added === 0, JSON.stringify(r.data));
+
+  r = await call('listDishes', {}, GUEST_B);
+  expect('刚导入时朋友端看不到菜（菜库默认全部下架，等主人勾今晚的）', r.data.dishes.length === 0, '实际=' + r.data.dishes.length);
+
+  r = await call('listDishes', { all: true }, HOST);
+  expect('主人端 all=true 看到全部 ' + SEED.length + ' 道', r.data.dishes.length === SEED.length, '实际=' + r.data.dishes.length);
+  r = await call('listDishes', { all: true }, GUEST_B);
+  expect('朋友传 all=true 也拿不到未上架的菜', r.data.dishes.length === 0, '实际=' + r.data.dishes.length);
+
+  /* --- 上下架 --- */
+  r = await call('batchToggle', { available: true }, HOST);
+  expect('全部上架 → 更新 ' + SEED.length + ' 道', r.ok && r.data.updated === SEED.length, JSON.stringify(r.data));
+
+  r = await call('listDishes', {}, GUEST_B);
+  const visible = r.data.dishes;
+  expect('全部上架后朋友端看到 ' + SEED.length + ' 道', visible.length === SEED.length, '实际=' + visible.length);
+  expect('朋友端菜品不含 _openid 字段', visible.every((d) => d._openid === undefined));
+  expect('朋友端菜品按 sort 升序', visible.every((d, i) => i === 0 || visible[i - 1].sort <= d.sort));
+
+  r = await call('batchToggle', { available: false }, HOST);
+  expect('全部下架 → 更新 ' + SEED.length + ' 道', r.ok && r.data.updated === SEED.length, JSON.stringify(r.data));
+  r = await call('listDishes', {}, GUEST_B);
+  expect('全部下架后朋友端菜单为空', r.data.dishes.length === 0);
+
+  // 后面的下单测试需要菜是上架的，恢复回来
+  await call('batchToggle', { available: true }, HOST);
+
+  r = await call('toggleDish', { id: 'nope', available: true }, GUEST_C);
+  expect('非管理员不能上下架', r.ok === false, r.msg);
+
+  /* 限量：自己设一个，不依赖种子数据里恰好有没有限量菜 */
+  const allDishes = (await call('listDishes', { all: true }, HOST)).data.dishes;
+  const water = allDishes.find((d) => d.limit === null);
+  r = await call('updateDish', { id: water._id, patch: { limit: 4 } }, HOST);
+  expect('能把一道菜设成限量 4 份（' + water.name + '）', r.ok === true, r.msg);
+
+  /* --- 家宴设置 --- */
+  r = await call('updateConfig', { patch: { title: '周六家宴', maxDishesPerOrder: 8 } }, HOST);
+  expect('改标题与每人上限', r.ok && r.data.title === '周六家宴' && r.data.maxDishesPerOrder === 8, JSON.stringify(r.data));
+  r = await call('updateConfig', { patch: { title: 'x' } }, GUEST_C);
+  expect('非管理员不能改设置', r.ok === false, r.msg);
+
+  /* --- 下单 --- */
+  const cartB = [
+    { dishId: water._id, name: water.name, emoji: water.emoji, qty: 3, note: '多放醋' },
+    { dishId: water._id, name: water.name, emoji: water.emoji, qty: 0, note: '这条应被过滤掉' }
+  ];
+  r = await call('submitOrder', { nick: '老王', partySize: 3, arriveAt: '18:00', note: '一位不吃香菜', items: cartB }, GUEST_B);
+  expect('老王下单成功', r.ok && r.data.updated === false, JSON.stringify(r.data));
+
+  r = await call('myOrder', {}, GUEST_B);
+  const orderB = r.data.order;
+  expect('myOrder 能查到自己那一单', !!orderB && orderB.nick === '老王');
+  expect('qty=0 的条目被过滤', orderB.items.length === 1, 'items=' + orderB.items.length);
+  expect('myOrder 不外泄 _openid', orderB._openid === undefined);
+  expect('订单计算出 totalQty', orderB.totalQty === 3, 'totalQty=' + orderB.totalQty);
+
+  r = await call('submitOrder', { nick: '老王', partySize: 3, items: [{ dishId: water._id, qty: 2 }] }, GUEST_B);
+  expect('重复提交是覆盖而不是新增一单', r.ok && r.data.updated === true);
+  r = await call('summary', {}, HOST);
+  expect('覆盖后只有 1 单', r.data.stats.orderCount === 1, 'orderCount=' + r.data.stats.orderCount);
+  expect('覆盖后份数按新单算（2 份）', r.data.stats.totalDishes === 2, 'totalDishes=' + r.data.stats.totalDishes);
+
+  /* --- 限量校验 --- */
+  r = await call('submitOrder', { nick: '小李', partySize: 2, items: [{ dishId: water._id, qty: 3 }] }, GUEST_C);
+  expect('限量校验：超量下单被拒绝', r.ok === false, r.msg);
+  expect('拒绝信息提示剩余份数', /只剩|点完/.test(r.msg || ''), r.msg);
+
+  r = await call('submitOrder', { nick: '小李', partySize: 2, items: [{ dishId: water._id, qty: 2 }] }, GUEST_C);
+  expect('限量内下单成功', r.ok === true, r.msg);
+
+  /* --- 每人上限：用不限量的菜才能真正测到上限规则 --- */
+  r = await call('submitOrder', { nick: '小李', partySize: 2, items: [{ dishId: water._id, qty: 5 }] }, GUEST_C);
+  expect('超过限量时同样被拒（限量优先于上限）', r.ok === false, r.msg);
+
+  /* --- 下架校验 --- */
+  const salad = (await call('listDishes', { all: true }, HOST)).data.dishes.find((d) => d._id !== water._id);
+  await call('toggleDish', { id: salad._id, available: false }, HOST);
+  r = await call('submitOrder', { nick: '小李', partySize: 2, items: [{ dishId: salad._id, qty: 1 }] }, GUEST_C);
+  expect('点已下架的菜被拒绝', r.ok === false && /下架/.test(r.msg || ''), r.msg);
+  await call('toggleDish', { id: salad._id, available: true }, HOST);
+
+  /* --- 汇总看板 --- */
+  r = await call('summary', {}, GUEST_C);
+  expect('非管理员看不到后厨看板', r.ok === false, r.msg);
+
+  r = await call('summary', {}, HOST);
+  const sum = r.data;
+  expect('汇总：2 单 / 5 人', sum.stats.orderCount === 2 && sum.stats.totalPeople === 5, JSON.stringify(sum.stats));
+  expect('汇总：按人明细含昵称与人数', sum.orders.length === 2 && sum.orders.every((o) => o.nick && o.partySize));
+  const waterTotal = sum.dishTotals.find((t) => t.name === water.name);
+  expect('汇总：' + water.name + ' 合计 4 份（2+2）', waterTotal && waterTotal.qty === 4, JSON.stringify(waterTotal));
+  expect('汇总：带出每个点单人的昵称', waterTotal && waterTotal.guests.length === 2, JSON.stringify(waterTotal && waterTotal.guests));
+  expect('汇总：菜品按份数降序', sum.dishTotals.every((t, i) => i === 0 || sum.dishTotals[i - 1].qty >= t.qty));
+
+  /* --- 朋友之间互相可见：「大家都在点什么」不需要主人权限 --- */
+  r = await call('board', {}, GUEST_C);
+  expect('朋友（非主人）也能拿到「大家都在点什么」', r.ok === true && r.data.inited === true, r.msg);
+  expect('board 聚合出菜品份数与点单人',
+    r.data.dishTotals.some((t) => t.dishId === water._id && t.qty === 4 && t.guests.length === 2),
+    JSON.stringify(r.data.dishTotals));
+  expect('board 带出每个人的点单',
+    r.data.orders.length === 2 && r.data.orders.every((o) => o.nick && o.items.length),
+    JSON.stringify(r.data.orders.map((o) => o.nick)));
+  expect('board 不泄露主人口令', r.data.config.hostCode === undefined);
+  expect('board 不泄露订单内部 id', r.data.orders.every((o) => o.orderId === undefined));
+  expect('board 不泄露 openid / token', r.data.orders.every((o) => o._openid === undefined && o.token === undefined));
+  expect('board 与主人看板用的是同一份聚合逻辑',
+    r.data.stats.orderCount === sum.stats.orderCount && r.data.stats.totalDishes === sum.stats.totalDishes,
+    JSON.stringify(r.data.stats) + ' vs ' + JSON.stringify(sum.stats));
+  /* --- 主人自己的单要被标记（自测单会污染人数/份数） --- */
+  const freeDish = (await call('listDishes', {}, GUEST_B)).data.dishes.find((d) => !d.limit);
+  r = await call('submitOrder', { nick: '主人自测', partySize: 1, items: [{ dishId: freeDish._id, qty: 1 }] }, WIFE);
+  expect('管理员（配偶）也能正常下单', r.ok === true, r.msg);
+
+  r = await call('summary', {}, HOST);
+  const hostOrder = r.data.orders.find((o) => o.nick === '主人自测');
+  const guestOrder = r.data.orders.find((o) => o.nick === '老王');
+  expect('汇总把管理员自己的单标记为 isHost', !!hostOrder && hostOrder.isHost === true, JSON.stringify(hostOrder && hostOrder.isHost));
+  expect('朋友的单不会被标记成 isHost', !!guestOrder && guestOrder.isHost === false, JSON.stringify(guestOrder && guestOrder.isHost));
+
+  await call('cancelOrder', {}, WIFE);
+  r = await call('summary', {}, HOST);
+  expect('撤销自测单后汇总里不再有 isHost 标记', r.data.orders.every((o) => !o.isHost));
+
+  /* --- 截止时间 --- */
+  await call('updateConfig', { patch: { deadlineTs: Date.now() - 1000 } }, HOST);
+  r = await call('submitOrder', { nick: '老王', partySize: 3, items: [{ dishId: water._id, qty: 1 }] }, GUEST_B);
+  expect('截止后不能再下单', r.ok === false && /截止/.test(r.msg || ''), r.msg);
+  r = await call('myOrder', {}, GUEST_B);
+  expect('截止后仍然能查看自己的单', r.ok && !!r.data.order);
+  await call('updateConfig', { patch: { deadlineTs: 0 } }, HOST);
+  r = await call('submitOrder', { nick: '老王', partySize: 3, items: [{ dishId: water._id, qty: 1 }] }, GUEST_B);
+  expect('取消截止后又能下单', r.ok === true, r.msg);
+
+  /* --- 撤单 --- */
+  r = await call('cancelOrder', {}, GUEST_B);
+  expect('撤单成功', r.ok === true);
+  r = await call('myOrder', {}, GUEST_B);
+  expect('撤单后查不到自己的单', r.data.order === null);
+  r = await call('summary', {}, HOST);
+  expect('撤单后汇总只剩 1 单', r.data.stats.orderCount === 1, 'orderCount=' + r.data.stats.orderCount);
+
+  /* --- 删除菜品不影响历史汇总 --- */
+  await call('removeDish', { id: water._id }, HOST);
+  r = await call('summary', {}, HOST);
+  const still = r.data.dishTotals.find((t) => t.name === water.name);
+  expect('删掉的菜在历史汇总里仍显示菜名', !!still && still.qty === 2, JSON.stringify(r.data.dishTotals));
+  r = await call('listDishes', { all: true }, HOST);
+  expect('删除后菜库剩 ' + (SEED.length - 1) + ' 道', r.data.dishes.length === SEED.length - 1, '实际=' + r.data.dishes.length);
+
+  /* --- 参数防御与边界 --- */
+  r = await call('submitOrder', { nick: '空单', partySize: 1, items: [] }, GUEST_C);
+  expect('空点单被拒绝', r.ok === false, r.msg);
+
+  r = await call('submitOrder', { nick: '全是零', partySize: 1, items: [{ dishId: salad._id, qty: 0 }] }, GUEST_C);
+  expect('份数全为 0 的点单被拒绝', r.ok === false, r.msg);
+
+  r = await call('submitOrder', { nick: '上限', partySize: 1, items: [{ dishId: salad._id, qty: 9 }] }, GUEST_C);
+  expect('每人上限（8 道）生效并给出明确提示', r.ok === false && /最多点 8 道/.test(r.msg || ''), r.msg);
+
+  r = await call('submitOrder', { nick: '刚好上限', partySize: 1, items: [{ dishId: salad._id, qty: 8 }] }, GUEST_C);
+  expect('正好等于上限时允许提交', r.ok === true, r.msg);
+
+  r = await call(
+    'submitOrder',
+    { nick: '很长的昵称'.repeat(10), partySize: 999, items: [{ dishId: salad._id, qty: 1 }] },
+    GUEST_C
+  );
+  expect('极端人数 + 超长昵称仍能提交（服务端裁剪）', r.ok === true, r.msg);
+  const trimmed = (await call('myOrder', {}, GUEST_C)).data.order;
+  expect('昵称被裁剪到 20 字以内', !!trimmed && String(trimmed.nick).length <= 20,
+    trimmed ? String(trimmed.nick).length + ' 字' : '无');
+  expect('人数被裁剪到 1-50', !!trimmed && trimmed.partySize >= 1 && trimmed.partySize <= 50,
+    trimmed ? String(trimmed.partySize) : '无');
+  expect('超长备注也被裁剪', !!trimmed && String(trimmed.note || '').length <= 100);
+
+  r = await call('updateConfig', { patch: { maxDishesPerOrder: 0 } }, HOST);
+  expect('关掉每人上限后保存成功', r.ok && r.data.maxDishesPerOrder === 0);
+
+  r = await call('不存在的action', {}, HOST);
+  expect('未知 action 返回 ok=false', r.ok === false && /未知操作/.test(r.msg));
+
+  /* --- 主人端调整点单：去掉菜品（两种范围） --- */
+  // 注意：要从"现在"的菜谱里挑，不能用早先的快照——中间已经删过菜了
+  const freshAll = (await call('listDishes', { all: true }, HOST)).data.dishes;
+  const second = freshAll.find((d) => d.available && d._id !== salad._id);
+  r = await call('submitOrder', { nick: '老王', partySize: 3, items: [{ dishId: salad._id, qty: 1 }, { dishId: second._id, qty: 1 }] }, GUEST_B);
+  expect('准备数据：老王点了两道菜（' + salad.name + ' + ' + second.name + '）', r.ok === true, r.msg);
+  r = await call('submitOrder', { nick: '小李', partySize: 2, items: [{ dishId: salad._id, qty: 2 }] }, GUEST_C);
+  expect('准备数据：小李点了 ' + salad.name + ' ×2', r.ok === true, r.msg);
+
+  let sum2 = (await call('summary', {}, HOST)).data;
+  expect('汇总里带订单 id（主人端才能针对某一单调整）',
+    sum2.orders.every((o) => !!o.orderId), JSON.stringify(sum2.orders.map((o) => o.orderId)));
+  const wangOrder = sum2.orders.find((o) => o.nick === '老王');
+  const liOrder = sum2.orders.find((o) => o.nick === '小李');
+
+  r = await call('dropDish', { dishId: salad._id, orderId: wangOrder.orderId }, GUEST_C);
+  expect('非管理员不能调整点单', r.ok === false && /权限/.test(r.msg), r.msg);
+  r = await call('dropDish', { orderId: wangOrder.orderId }, HOST);
+  expect('不传菜品 id 会被拒绝', r.ok === false, r.msg);
+
+  r = await call('dropDish', { dishId: salad._id, orderId: wangOrder.orderId }, HOST);
+  expect('去掉某一单里的某道菜 → 只影响 1 单', r.ok && r.data.touched === 1, JSON.stringify(r.data));
+
+  r = await call('myOrder', {}, GUEST_B);
+  const wangAfter = r.data.order;
+  expect('老王的单只剩另一道菜', wangAfter.items.length === 1 && wangAfter.items[0].dishId === second._id, JSON.stringify(wangAfter.items));
+  expect('老王的单份数被重算', wangAfter.totalQty === 1, 'totalQty=' + wangAfter.totalQty);
+  expect('老王的单留下"主人调整过"的说明', /主人去掉了/.test(wangAfter.hostNote || ''), wangAfter.hostNote);
+
+  r = await call('myOrder', {}, GUEST_C);
+  expect('小李的单完全没被动', r.data.order.items.length === 1 && r.data.order.items[0].dishId === salad._id);
+  expect('没被动过的单不会被写说明', !r.data.order.hostNote, r.data.order.hostNote);
+
+  /* 从所有订单里去掉这道菜 */
+  r = await call('dropDish', { dishId: salad._id }, HOST);
+  expect('「这道菜不做了」→ 影响到的单数正确', r.ok && r.data.touched === 1, JSON.stringify(r.data));
+  expect('空掉的那一单被整单删除', r.data.emptied === 1, JSON.stringify(r.data));
+  expect('从所有订单去掉时会顺手下架这道菜', r.data.unlisted === true, JSON.stringify(r.data));
+
+  sum2 = (await call('summary', {}, HOST)).data;
+  expect('小李的单已随空单删除（只剩老王一单）', sum2.stats.orderCount === 1, 'orderCount=' + sum2.stats.orderCount);
+  expect('汇总里不再有这道菜', !sum2.dishTotals.some((t) => t.dishId === salad._id), JSON.stringify(sum2.dishTotals.map((t) => t.name)));
+  r = await call('listDishes', { all: true }, HOST);
+  expect('这道菜在下架之后朋友端看不到', (await call('listDishes', {}, GUEST_B)).data.dishes.every((d) => d._id !== salad._id));
+  expect('菜谱里它还在，只是下架了', r.data.dishes.some((d) => d._id === salad._id && d.available === false));
+
+  /* 朋友重新提交后，调整说明要清掉（否则会一直挂着） */
+  await call('submitOrder', { nick: '老王', partySize: 3, items: [{ dishId: second._id, qty: 2 }] }, GUEST_B);
+  r = await call('myOrder', {}, GUEST_B);
+  expect('朋友重新提交后"主人调整过"的说明被清掉', !r.data.order.hostNote, JSON.stringify(r.data.order.hostNote));
+
+  /* --- 主人端改份数：朋友误点多了，主人减掉 --- */
+  r = await call('submitOrder', { nick: '老王', partySize: 3, items: [{ dishId: second._id, qty: 3 }] }, GUEST_B);
+  expect('准备数据：老王点了 3 份 ' + second.name, r.ok === true, r.msg);
+
+  let sum3 = (await call('summary', {}, HOST)).data;
+  const wangOrder3 = sum3.orders.filter((o) => o.nick === '老王')[0];
+  expect('准备数据：能定位到订单 id', !!wangOrder3 && !!wangOrder3.orderId, JSON.stringify(sum3.orders.map((o) => o.nick)));
+
+  r = await call('setItemQty', { orderId: wangOrder3.orderId, dishId: second._id, qty: 1 }, GUEST_C);
+  expect('非管理员不能改份数', r.ok === false && /权限/.test(r.msg), r.msg);
+  r = await call('setItemQty', { orderId: wangOrder3.orderId, dishId: second._id }, HOST);
+  expect('漏传份数会被拒绝（不能默认成 0 份误删）', r.ok === false && /份数/.test(r.msg), r.msg);
+  r = await call('setItemQty', { orderId: 'nope', dishId: second._id, qty: 1 }, HOST);
+  expect('订单不存在时给明确提示', r.ok === false && /不在了/.test(r.msg), r.msg);
+
+  r = await call('setItemQty', { orderId: wangOrder3.orderId, dishId: second._id, qty: 1 }, HOST);
+  expect('把 3 份改成 1 份', r.ok && r.data.qty === 1 && r.data.totalQty === 1, JSON.stringify(r.data));
+  r = await call('myOrder', {}, GUEST_B);
+  expect('朋友端看到份数被改小', r.data.order.items[0].qty === 1 && r.data.order.totalQty === 1, JSON.stringify(r.data.order.items));
+  expect('朋友端看到"主人改成了"的说明', /主人把/.test(r.data.order.hostNote || ''), r.data.order.hostNote);
+
+  r = await call('setItemQty', { orderId: wangOrder3.orderId, dishId: second._id, qty: 200 }, HOST);
+  expect('份数会被夹到上限 99', r.ok && r.data.qty === 99, JSON.stringify(r.data));
+
+  r = await call('setItemQty', { orderId: wangOrder3.orderId, dishId: second._id, qty: 0 }, HOST);
+  expect('改成 0 份 = 整条去掉，空单同时被删除',
+    r.ok && r.data.qty === 0 && r.data.removedOrder === true, JSON.stringify(r.data));
+  r = await call('myOrder', {}, GUEST_B);
+  expect('整单删掉后朋友查不到单了', r.data.order === null);
+  sum3 = (await call('summary', {}, HOST)).data;
+  expect('汇总里这一单也消失了', !sum3.orders.some((o) => o.nick === '老王'), JSON.stringify(sum3.orders.map((o) => o.nick)));
+
+  r = await call('setItemQty', { orderId: wangOrder3.orderId, dishId: second._id, qty: 1 }, HOST);
+  expect('对已删除的订单再改份数 → 明确提示', r.ok === false && /不在了/.test(r.msg), r.msg);
+}
+
+/**
+ * 兼容性回归：云开发 SDK 在不同版本/环境下行为不一致，
+ * 云函数必须在这些差异下都不崩。
+ *
+ * 起因：线上第一次初始化报 "Cannot read properties of null (reading 'admins')"。
+ * 根因是 saveConfig 依赖 doc().update() 在文档不存在时抛错，
+ * 而真实 SDK 是静默返回 stats.updated = 0，导致配置从未创建、随后读回 null。
+ * 当初 mock 是"抛错"行为，所以测试全绿却漏掉了这个 bug。
+ */
+async function runBackendCompatibility() {
+  console.log('\n[A2] 兼容性回归：SDK 行为差异下也不能崩');
+
+  const originalCollections = state.collections;
+
+  /* ---- 场景 1：update 在文档不存在时静默失败（线上真实行为） ---- */
+  state.collections = {};
+  state.seq = 0;
+  state.updateOnMissing = 'silent';
+  state.configReadFails = false;
+
+  let r = await call('whoami', {}, 'compat_host');
+  expect('静默模式下 whoami 正常显示未初始化', r.ok && r.data.inited === false);
+
+  r = await call('board', {}, 'compat_guest');
+  expect('未初始化时「大家都在点什么」返回空且不报错',
+    r.ok === true && r.data.inited === false && r.data.orders.length === 0, JSON.stringify(r.data));
+
+  r = await call('init', {}, 'compat_host');
+  expect('静默模式下 init 不再崩溃（回归点）', r.ok === true, r.msg || JSON.stringify(r.data));
+  expect('静默模式下 init 返回主人身份', r.ok && r.data.isAdmin === true);
+  const code = r.ok && r.data.config ? r.data.config.hostCode : '';
+
+  r = await call('whoami', {}, 'compat_host');
+  expect('静默模式下配置真的落库了（whoami 能读到）', r.ok && r.data.inited === true && r.data.config !== null);
+  expect('静默模式下配置内容正确', r.ok && r.data.config && r.data.config.title === '周末家宴');
+
+  r = await call('whoami', {}, 'compat_guest');
+  expect('静默模式下朋友仍然是客人', r.ok && r.data.isAdmin === false);
+
+  r = await call('init', { hostCode: code }, 'compat_wife');
+  expect('静默模式下口令认领仍然有效', r.ok && r.data.isAdmin === true, r.msg);
+
+  r = await call('seedDishes', { dishes: SEED }, 'compat_host');
+  expect('静默模式下导入菜库正常', r.ok && r.data.added === SEED.length, JSON.stringify(r.data));
+
+  await call('batchToggle', { available: true }, 'compat_host');
+  r = await call('listDishes', {}, 'compat_guest');
+  expect('静默模式下朋友端看到 ' + SEED.length + ' 道菜', r.ok && r.data.dishes.length === SEED.length, '实际=' + (r.ok ? r.data.dishes.length : r.msg));
+
+  const compatDish = r.ok ? r.data.dishes[0] : null;
+  r = await call('submitOrder', { nick: '兼容测试', partySize: 1, items: [{ dishId: compatDish._id, qty: 2 }] }, 'compat_guest');
+  expect('静默模式下下单成功', r.ok === true, r.msg);
+
+  r = await call('summary', {}, 'compat_host');
+  expect('静默模式下汇总正常', r.ok && r.data.stats.orderCount === 1, JSON.stringify(r.ok ? r.data.stats : r.msg));
+
+  r = await call('updateConfig', { patch: { title: '静默模式家宴' } }, 'compat_host');
+  expect('静默模式下改设置后仍能读回', r.ok && r.data.title === '静默模式家宴', JSON.stringify(r.data));
+  r = await call('whoami', {}, 'compat_host');
+  expect('静默模式下改设置真的持久化了', r.ok && r.data.config.title === '静默模式家宴', r.ok ? r.data.config.title : r.msg);
+
+  /* ---- 场景 2：配置读一直失败，init 也不能崩 ---- */
+  state.collections = {};
+  state.seq = 0;
+  state.updateOnMissing = 'throw';
+  state.configReadFails = true;
+
+  r = await call('init', {}, 'blind_host');
+  expect('读配置持续失败时 init 不崩、仍返回主人身份', r.ok === true && r.data.isAdmin === true, r.msg || JSON.stringify(r.data));
+
+  /* ---- 场景 3：半成品配置（有文档但没管理员）要能自愈 ---- */
+  state.configReadFails = false;
+  state.collections = {};
+  state.seq = 0;
+
+  await call('init', {}, 'first_host');
+  const cfgDoc = state.collections.config.find((d) => d._id === 'party');
+  expect('初始化后 config 文档存在', !!cfgDoc);
+  cfgDoc.admins = []; // 模拟"上次初始化中途失败留下的半成品"
+
+  r = await call('init', {}, 'second_host');
+  expect('半成品配置能被第一个到达的人认领（自愈）', r.ok === true && r.data.isAdmin === true, r.msg);
+
+  r = await call('init', { hostCode: '0000' }, 'third_host');
+  expect('认领之后别人仍然需要正确口令', r.ok === false && /口令/.test(r.msg), r.msg);
+
+  state.collections = originalCollections;
+}
+
+/* ------------------------- 前端 ------------------------- */
+
+function makeWxMock() {
+  return {
+    cloud: { init() {}, callFunction() {} },
+    getStorageSync: () => '',
+    setStorageSync() {},
+    showToast() {},
+    showModal() {},
+    showLoading() {},
+    hideLoading() {},
+    setClipboardData() {},
+    switchTab() {},
+    navigateTo() {},
+    navigateBack() {},
+    stopPullDownRefresh() {}
+  };
+}
+
+async function loadPages() {
+  console.log('\n[B] 前端页面加载与纯逻辑');
+  global.wx = makeWxMock();
+  global.getApp = () => ({
+    globalData: { openid: '', isAdmin: false, cfg: null },
+    ensureSession: () => Promise.resolve({ inited: true, isAdmin: false, config: null }),
+    refreshSession: () => Promise.resolve({})
+  });
+
+  let captured = null;
+  global.App = (o) => {
+    captured = { app: o };
+  };
+  global.Page = (o) => {
+    captured = { page: o };
+  };
+
+  const files = {
+    app: 'miniprogram/app.js',
+    index: 'miniprogram/pages/index/index.js',
+    mine: 'miniprogram/pages/mine/mine.js',
+    menu: 'miniprogram/pages/admin/menu/menu.js',
+    dashboard: 'miniprogram/pages/admin/dashboard/dashboard.js'
+  };
+
+  const loaded = {};
+  Object.keys(files).forEach((key) => {
+    captured = null;
+    try {
+      require(path.join(ROOT, files[key]));
+      loaded[key] = captured && (captured.page || captured.app);
+      ok('加载 ' + files[key]);
+    } catch (e) {
+      loaded[key] = null;
+      bad('加载 ' + files[key], e.message);
+    }
+  });
+
+  /* 页面方法齐全性 */
+  const expectMethods = {
+    index: ['bootstrap', 'buildShown', 'onPlus', 'onMinus', 'onNote', 'onSubmit', 'onClearCart', 'reloadMenu', 'onInitAsHost', 'goMenu', 'goDashboard', 'onHide', 'onUnload', 'startDeadlineTick', 'stopDeadlineTick', 'onToggleBoard', 'loadBoard', 'mapBoard'],
+    mine: ['refresh', 'applyOrder', 'onCancel', 'onCopy', 'onBecomeAdmin'],
+    menu: ['load', 'buildGroups', 'onToggleDish', 'onToggleCategory', 'batchAll', 'onLimitEdit', 'onImportSeed', 'onSaveSettings', 'onClearDeadline', 'onToggleDeadline'],
+    dashboard: ['load', 'buildText', 'mapOrders', 'onCopy', 'previewText', 'onRefresh', 'onShow', 'onHide', 'onUnload', 'startAutoRefresh', 'scheduleRefresh', 'stopAutoRefresh', 'onDropDish', 'onDropOrderItem', 'dropDish', 'onDecItem', 'onEditItemQty', 'setItemQty']
+  };
+  Object.keys(expectMethods).forEach((key) => {
+    const page = loaded[key];
+    if (!page) return bad('页面方法检查 ' + key, '页面未加载');
+    const missing = expectMethods[key].filter((m) => typeof page[m] !== 'function');
+    if (missing.length) bad('页面方法缺失 ' + key, missing.join(','));
+    else ok('页面方法齐全 ' + key + '（' + expectMethods[key].length + ' 个）');
+  });
+
+  /* 购物车计算 */
+  if (loaded.index) {
+    const ctx = {
+      data: {
+        dishes: [
+          { _id: 'd1', name: '红烧肉', category: '热菜', emoji: '🍖', desc: '', tags: ['硬菜'], limit: null },
+          { _id: 'd2', name: '白灼虾', category: '热菜', emoji: '🦐', desc: '', tags: [], limit: null },
+          { _id: 'd3', name: '拍黄瓜', category: '凉菜', emoji: '🥒', desc: '', tags: [], limit: null }
+        ],
+        activeCat: '全部'
+      },
+      cart: { d1: 2, d2: 1 },
+      notes: { d1: '多放糖' },
+      setData(d) {
+        Object.assign(this.data, d);
+      }
+    };
+    loaded.index.buildShown.call(ctx);
+    expect('购物车：全部显示 3 道菜', ctx.data.shown.length === 3, 'shown=' + ctx.data.shown.length);
+    expect('购物车：合计 3 份', ctx.data.cartCount === 3, 'cartCount=' + ctx.data.cartCount);
+    expect('购物车：备注回填到菜品', ctx.data.shown[0].note === '多放糖', JSON.stringify(ctx.data.shown[0].note));
+
+    ctx.data.activeCat = '凉菜';
+    loaded.index.buildShown.call(ctx);
+    expect('分类筛选只显示该类的菜', ctx.data.shown.length === 1 && ctx.data.shown[0].name === '拍黄瓜');
+    expect('分类筛选时合计份数不变（3 份）', ctx.data.cartCount === 3, 'cartCount=' + ctx.data.cartCount);
+
+    /* 回归：主人下架某道菜后，朋友购物车里的它必须被清掉
+       （否则底部计数多算、提交被服务端拒绝，而界面上没有那一行可以减） */
+    ctx.data.activeCat = '全部';
+    ctx.cart.d9 = 5;
+    ctx.notes.d9 = '已经下架的菜';
+    loaded.index.buildShown.call(ctx);
+    expect('已下架的菜被剔出购物车：不再计入总数', ctx.data.cartCount === 3, 'cartCount=' + ctx.data.cartCount);
+    expect('已下架的菜被剔出购物车：条目和备注都清掉',
+      ctx.cart.d9 === undefined && ctx.notes.d9 === undefined,
+      JSON.stringify({ cart: ctx.cart, notes: ctx.notes }));
+    expect('剔除后仍能正常渲染菜单', ctx.data.shown.length === 3, 'shown=' + ctx.data.shown.length);
+
+    /* 「大家都在点什么」：朋友之间互相可见的那份数据的整理 */
+    const bd = loaded.index.mapBoard({
+      stats: { orderCount: 2, totalPeople: 5, totalDishes: 7 },
+      dishTotals: [{ dishId: 'd1', emoji: '🍖', name: '红烧肉', qty: 3, guests: ['老王', '小李'] }],
+      orders: [
+        { nick: '老王', partySize: 3, isHost: false, items: [{ name: '红烧肉', qty: 2 }] },
+        { nick: '老王', partySize: 1, isHost: true, items: [{ name: '拍黄瓜', qty: 1 }] }
+      ]
+    });
+    expect('朋友看板：菜品行带份数和点单人',
+      bd.totals[0].qty === 3 && bd.totals[0].guestsText === '老王、小李', JSON.stringify(bd.totals[0]));
+    expect('朋友看板：同名的人 key 仍然唯一（不能拿昵称当 key）',
+      bd.orders[0].key !== bd.orders[1].key, bd.orders.map((o) => o.key).join(','));
+    expect('朋友看板：主人的单会被标出来', bd.orders[1].nick.indexOf('（主人）') >= 0, bd.orders[1].nick);
+    expect('朋友看板：按人明细压成一行文字', bd.orders[0].itemsText === '红烧肉 ×2', bd.orders[0].itemsText);
+    expect('朋友看板：缺字段时不崩', loaded.index.mapBoard({}).stats.orderCount === 0);
+
+    /* 提交前要用"现在"重新判定截止状态（页面可能已经开了很久） */
+    const obCtx = {
+      data: { closed: false, cartCount: 3, showSubmit: false, nick: '老王' },
+      syncDeadline() {
+        this.data.closed = true; // 模拟本地重算后发现已经截止
+      },
+      setData(d) {
+        Object.assign(this.data, d);
+      }
+    };
+    loaded.index.onOpenSubmit.call(obCtx);
+    expect('页面开着很久后：已截止就不弹提交框', obCtx.data.showSubmit === false, JSON.stringify(obCtx.data));
+
+    const obCtx2 = {
+      data: { closed: false, cartCount: 3, showSubmit: false, nick: '老王' },
+      syncDeadline() {
+        this.data.closed = false;
+      },
+      setData(d) {
+        Object.assign(this.data, d);
+      }
+    };
+    loaded.index.onOpenSubmit.call(obCtx2);
+    expect('未截止时正常弹出提交框', obCtx2.data.showSubmit === true);
+
+    const obCtx3 = {
+      data: { closed: false, cartCount: 0, showSubmit: false, nick: '老王' },
+      syncDeadline() {
+        this.data.closed = false;
+      },
+      setData(d) {
+        Object.assign(this.data, d);
+      }
+    };
+    loaded.index.onOpenSubmit.call(obCtx3);
+    expect('一道菜都没点时不会弹出提交框', obCtx3.data.showSubmit === false);
+
+    /* 点菜页的倒计时计时器：同样不能泄漏、不能留在后台 */
+    const realSetInterval2 = global.setInterval;
+    const realClearInterval2 = global.clearInterval;
+    let activeTimers2 = 0;
+    global.setInterval = function (fn, ms) {
+      activeTimers2 += 1;
+      return realSetInterval2(fn, ms);
+    };
+    global.clearInterval = function (t) {
+      if (t) activeTimers2 -= 1;
+      return realClearInterval2(t);
+    };
+    try {
+      const tickCtx = {
+        data: {},
+        setData(d) {
+          Object.assign(this.data, d);
+        },
+        syncDeadline() {}
+      };
+      tickCtx.startDeadlineTick = loaded.index.startDeadlineTick;
+      tickCtx.stopDeadlineTick = loaded.index.stopDeadlineTick;
+
+      tickCtx.startDeadlineTick();
+      expect('点菜页：启动倒计时刷新后持有定时器', !!tickCtx.deadlineTimer && activeTimers2 === 1, '活跃定时器=' + activeTimers2);
+      tickCtx.startDeadlineTick();
+      expect('点菜页：重复启动不会泄漏第二个定时器', activeTimers2 === 1, '活跃定时器=' + activeTimers2);
+      tickCtx.stopDeadlineTick();
+      expect('点菜页：停止后定时器被清空', tickCtx.deadlineTimer === null && activeTimers2 === 0, '活跃定时器=' + activeTimers2);
+
+      const hideCtx2 = {
+        stopped: 0,
+        stopDeadlineTick() {
+          this.stopped += 1;
+        }
+      };
+      loaded.index.onHide.call(hideCtx2);
+      loaded.index.onUnload.call(hideCtx2);
+      expect('点菜页：离开页面都会停止倒计时刷新', hideCtx2.stopped === 2, 'stopped=' + hideCtx2.stopped);
+    } finally {
+      global.setInterval = realSetInterval2;
+      global.clearInterval = realClearInterval2;
+    }
+  }
+
+  /* 我的点单明细 */
+  if (loaded.mine) {
+    const ctx = {
+      data: {},
+      setData(d) {
+        Object.assign(this.data, d);
+      }
+    };
+    loaded.mine.applyOrder.call(ctx, {
+      nick: '老王',
+      partySize: 3,
+      totalQty: 4,
+      hostNote: '主人去掉了：拍黄瓜',
+      items: [
+        { dishId: 'd1', name: '红烧肉', emoji: '🍖', qty: 2, note: '多放糖' },
+        { dishId: 'd2', name: '白灼虾', emoji: '🦐', qty: 2, note: '' }
+      ],
+      createdAt: new Date('2026-09-10T12:00:00Z')
+    });
+    expect('我的点单：解开 2 条明细', ctx.data.items.length === 2);
+    expect('我的点单：保留每道菜备注', ctx.data.items[0].note === '多放糖');
+    expect('我的点单：生成提交时间', !!ctx.data.submittedAt, ctx.data.submittedAt);
+    expect('我的点单：显示"主人调整过"的说明', ctx.data.hostNote === '主人去掉了：拍黄瓜', ctx.data.hostNote);
+
+    loaded.mine.applyOrder.call(ctx, null);
+    expect('我的点单：清空后 items 为空', ctx.data.items.length === 0 && ctx.data.order === null);
+    expect('我的点单：清空后调整说明也清掉', ctx.data.hostNote === '', JSON.stringify(ctx.data.hostNote));
+  }
+
+  /* 菜库分组统计 */
+  if (loaded.menu) {
+    const ctx = {
+      all: [
+        { _id: 'a', name: '拍黄瓜', category: '凉菜', available: true },
+        { _id: 'b', name: '口水鸡', category: '凉菜', available: false },
+        { _id: 'c', name: '红烧肉', category: '热菜', available: true }
+      ],
+      data: {},
+      setData(d) {
+        Object.assign(this.data, d);
+      }
+    };
+    loaded.menu.buildGroups.call(ctx);
+    expect('菜库分组：2 个分类', ctx.data.groups.length === 2, 'groups=' + ctx.data.groups.length);
+    expect('菜库分组：凉菜 1/2 上架', ctx.data.groups[0].onCount === 1 && ctx.data.groups[0].dishes.length === 2);
+    expect('菜库分组：上架总数 2 / 总数 3', ctx.data.onCount === 2 && ctx.data.total === 3 && ctx.data.offCount === 1);
+  }
+
+  /* 截止时间取值：不能"没打算设，却被设上了" */
+  const fmtUtil = require(path.join(ROOT, 'miniprogram', 'utils', 'format.js'));
+  expect(
+    '截止开关关掉 → 保存为 0（不限时间）',
+    fmtUtil.deadlineForSave(false, '2026-09-12', '10:00') === 0,
+    String(fmtUtil.deadlineForSave(false, '2026-09-12', '10:00'))
+  );
+  expect(
+    '截止开关打开 → 按选的时间保存',
+    fmtUtil.deadlineForSave(true, '2026-09-12', '10:00') === new Date(2026, 8, 12, 10, 0, 0, 0).getTime(),
+    new Date(fmtUtil.deadlineForSave(true, '2026-09-12', '10:00')).toString()
+  );
+  expect('过去的时间会被识别出来（保存前提醒）', fmtUtil.isPastDeadline(Date.now() - 60000) === true);
+  expect('未来的时间不会被误判为过期', fmtUtil.isPastDeadline(Date.now() + 86400000) === false);
+  expect('0（不限时间）不算已过期', fmtUtil.isPastDeadline(0) === false);
+
+  /* 改份数输入框的内容解析（用户手输的数字最容易出边界 bug） */
+  expect('份数解析：正常数字', fmtUtil.parseQtyInput('2') === 2 && fmtUtil.parseQtyInput(' 3 ') === 3);
+  expect('份数解析：0 表示整条去掉', fmtUtil.parseQtyInput('0') === 0);
+  expect('份数解析：空输入 → null（不改）', fmtUtil.parseQtyInput('') === null && fmtUtil.parseQtyInput(null) === null);
+  expect('份数解析：非数字 → null（不改）', fmtUtil.parseQtyInput('两个') === null && fmtUtil.parseQtyInput('abc') === null);
+  expect('份数解析：负数按 0', fmtUtil.parseQtyInput('-3') === 0);
+  expect('份数解析：超过 99 夹到 99', fmtUtil.parseQtyInput('200') === 99);
+  expect('份数解析：小数向下取整', fmtUtil.parseQtyInput('2.9') === 2);
+
+  /* 看板复制文本 */
+  if (loaded.dashboard) {
+    const text = loaded.dashboard.buildText(
+      { title: '周末家宴' },
+      { stats: { orderCount: 2, totalPeople: 5, totalDishes: 7, dishKindCount: 3 } },
+      [
+        { emoji: '🍖', name: '红烧肉', qty: 3, guestsText: '老王、小李', notes: ['老王：多放糖'], limitText: '' },
+        { emoji: '🥟', name: '手工水饺', qty: 2, guestsText: '小李', notes: [], limitText: '限 4 份' }
+      ],
+      [
+        {
+          nick: '老王',
+          partySize: 3,
+          arriveAt: '18:00',
+          note: '一个不吃香菜',
+          totalQty: 4,
+          items: [
+            { name: '红烧肉', qty: 2, note: '多放糖' },
+            { name: '白灼虾', qty: 2, note: '' }
+          ]
+        },
+        {
+          nick: '主人自测',
+          partySize: 1,
+          arriveAt: '',
+          note: '',
+          totalQty: 1,
+          isHost: true,
+          items: [{ name: '拍黄瓜', qty: 1, note: '' }]
+        }
+      ]
+    );
+    expect('复制文本：含标题与总览', text.indexOf('周末家宴 点单汇总') >= 0 && text.indexOf('到场约 5 人') >= 0);
+    expect('复制文本：含菜品清单与份数', text.indexOf('【菜品清单】') >= 0 && text.indexOf('红烧肉 ×3 —— 老王、小李') >= 0);
+    expect('复制文本：含每道菜的口味备注', text.indexOf('↳ 老王：多放糖') >= 0);
+    expect('复制文本：含按人明细与到场时间', text.indexOf('老王（3 人，18:00 到）') >= 0);
+    expect('复制文本：含忌口备注', text.indexOf('备注：一个不吃香菜') >= 0);
+    expect('复制文本：主人自己的单会被标出来', text.indexOf('主人自测（1 人） ← 主人自己的单') >= 0,
+      text.split('\n').filter((l) => l.indexOf('主人自测') >= 0).join(' | '));
+
+    const empty = loaded.dashboard.buildText({ title: '家宴' }, { stats: {} }, [], []);
+    expect('复制文本：无人点单时给出占位提示', empty.indexOf('（还没有人点单）') >= 0);
+
+    /* 按人明细的渲染 key：昵称可能重复，key 必须唯一（不能用昵称当 key） */
+    const mapped = loaded.dashboard.mapOrders([
+      { orderId: 'o1', nick: '老王', partySize: 2, totalQty: 1, items: [{ dishId: 'd1', name: '红烧肉', qty: 1 }] },
+      { orderId: 'o2', nick: '老王', partySize: 1, totalQty: 2, isHost: true, items: [{ dishId: 'd1', name: '红烧肉', qty: 2 }] }
+    ]);
+    expect('看板：订单 id 透传（去掉某单里的菜要用）', mapped[0].orderId === 'o1' && mapped[1].orderId === 'o2',
+      mapped.map((m) => m.orderId).join(','));
+    expect('看板：两条同名订单的 key 仍然唯一',
+      mapped[0].key !== mapped[1].key && new Set(mapped.map((m) => m.key)).size === 2,
+      mapped.map((m) => m.key).join(', '));
+    expect('看板：菜品条目也有各自的唯一 key',
+      mapped[0].items[0].key !== mapped[1].items[0].key,
+      mapped[0].items[0].key + ' vs ' + mapped[1].items[0].key);
+    expect('看板：isHost 原样透传（true/false 都要正确）',
+      mapped[1].isHost === true && mapped[0].isHost === false,
+      mapped.map((m) => String(m.isHost)).join(', '));
+    expect('看板：缺字段时不崩（旧版云函数没有 isHost）',
+      loaded.dashboard.mapOrders([{ nick: 'x' }])[0].isHost === false &&
+        loaded.dashboard.mapOrders([{ nick: 'x' }])[0].items.length === 0);
+
+    /* 自动刷新：下单期间 2 秒一次，截止后降频，且离开页面必须清掉定时器 */
+    const realSetTimeout = global.setTimeout;
+    const realClearTimeout = global.clearTimeout;
+    let activeTimers = 0;
+    let lastDelay = null;
+    global.setTimeout = function (fn, ms) {
+      activeTimers += 1;
+      lastDelay = ms;
+      return realSetTimeout(fn, ms);
+    };
+    global.clearTimeout = function (t) {
+      if (t) activeTimers -= 1;
+      return realClearTimeout(t);
+    };
+
+    try {
+      const ctx = {
+        data: { closed: false },
+        setData(d) {
+          Object.assign(this.data, d);
+        },
+        load() {
+          return Promise.resolve();
+        }
+      };
+      // 页面对象上这几个方法本来就在一起，假 ctx 也要照做
+      ctx.startAutoRefresh = loaded.dashboard.startAutoRefresh;
+      ctx.scheduleRefresh = loaded.dashboard.scheduleRefresh;
+      ctx.stopAutoRefresh = loaded.dashboard.stopAutoRefresh;
+
+      ctx.startAutoRefresh();
+      expect('看板：下单期间的刷新间隔是 2 秒', lastDelay === 2000 && activeTimers === 1, 'delay=' + lastDelay + ' 活跃=' + activeTimers);
+
+      ctx.startAutoRefresh();
+      expect('看板：重复启动不会泄漏出第二个定时器', activeTimers === 1, '活跃定时器=' + activeTimers);
+
+      ctx.stopAutoRefresh();
+      expect('看板：停止后定时器被清空', ctx.autoTimer === null && activeTimers === 0, '活跃定时器=' + activeTimers);
+
+      ctx.data.closed = true;
+      ctx.startAutoRefresh();
+      expect('看板：截止后降频到 15 秒（省云函数调用次数）', lastDelay === 15000, 'delay=' + lastDelay);
+      ctx.stopAutoRefresh();
+
+      const hideCtx = {
+        stopped: 0,
+        stopAutoRefresh() {
+          this.stopped += 1;
+        }
+      };
+      loaded.dashboard.onHide.call(hideCtx);
+      loaded.dashboard.onUnload.call(hideCtx);
+      expect('看板：离开页面（onHide/onUnload）都会停止自动刷新', hideCtx.stopped === 2, 'stopped=' + hideCtx.stopped);
+    } finally {
+      global.setTimeout = realSetTimeout;
+      global.clearTimeout = realClearTimeout;
+    }
+  }
+
+  /* 报错翻译：部署期最容易撞到的几类失败，必须给人能照做的提示 */
+  const apiUtil = require(path.join(ROOT, 'miniprogram', 'utils', 'api.js'));
+
+  async function expectRawErrorRejected(label, errMsg, pattern) {
+    global.wx.cloud.callFunction = function (opts) {
+      opts.fail({ errMsg: errMsg });
+    };
+    try {
+      await apiUtil.call('whoami');
+      bad(label, '没有抛错');
+    } catch (e) {
+      expect(label, pattern.test(e.message), e.message);
+    }
+  }
+
+  async function expectResult(label, result, verify) {
+    global.wx.cloud.callFunction = function (opts) {
+      opts.success({ result: result });
+    };
+    try {
+      const data = await apiUtil.call('whoami');
+      verify(label, data);
+    } catch (e) {
+      bad(label, e.message);
+    }
+  }
+
+  // 以下报错翻译测试是异步的，loadPages 已声明为 async
+  await expectRawErrorRejected(
+    '报错翻译：云函数未部署 → 告诉你去上传部署',
+    'cloud.callFunction:fail Error: errCode: -501000 | errMsg: FunctionName parameter could not be found',
+    /还没部署/
+  );
+    await expectRawErrorRejected(
+      '报错翻译：云环境未初始化 → 指向 config.js 的 envId',
+      "cloud.callFunction:fail Error: errMsg: Cloud API isn't enabled, please call wx.cloud.init first",
+      /云开发没有初始化成功/
+    );
+    await expectRawErrorRejected(
+      '报错翻译：envId 不存在 → 指向 config.js 的 envId',
+      'cloud.callFunction:fail Error: errCode: -601002 | errMsg: env not exists',
+      /云环境 ID 不对/
+    );
+    await expectRawErrorRejected(
+      '报错翻译：超时 → 提示改云函数超时时间',
+      'cloud.callFunction:fail Error: timeout',
+      /超时/
+    );
+    await expectRawErrorRejected(
+      '报错翻译：网络失败 → 提示检查网络',
+      'request:fail socket hang up',
+      /网络异常/
+    );
+    await expectResult(
+      '正常返回：解开 result.data',
+      { ok: true, data: { openid: 'abc', isAdmin: true } },
+      (label, data) => expect(label, data && data.openid === 'abc' && data.isAdmin === true, JSON.stringify(data))
+    );
+
+    // 业务错误单独验证（expectResult 只覆盖成功分支）
+    global.wx.cloud.callFunction = function (opts) {
+      opts.success({ result: { ok: false, msg: '点单已经截止啦' } });
+    };
+    try {
+      await apiUtil.call('submitOrder');
+      bad('业务错误：云函数返回 ok=false 时应抛错', '没有抛错');
+    } catch (e) {
+      expect('业务错误：原样透传中文提示', e.message === '点单已经截止啦', e.message);
+    }
+
+    // 环境不支持云开发
+    const savedCloud = global.wx.cloud;
+    global.wx.cloud = undefined;
+    try {
+      await apiUtil.call('whoami');
+      bad('环境不支持云开发时应给出提示', '没有抛错');
+    } catch (e) {
+      expect('环境不支持云开发 → 提示调基础库版本', /基础库/.test(e.message), e.message);
+    }
+    global.wx.cloud = savedCloud;
+}
+
+/* ------------------------- 主流程 ------------------------- */
+
+(async () => {
+  console.log('家宴点菜 · 离线集成测试');
+  try {
+    await runBackend();
+  } catch (e) {
+    bad('后端测试异常中断', e && e.stack ? e.stack.split('\n')[0] : String(e));
+  }
+  try {
+    await runBackendCompatibility();
+  } catch (e) {
+    bad('兼容性回归测试异常中断', e && e.stack ? e.stack.split('\n')[0] : String(e));
+  }
+  try {
+    await loadPages();
+  } catch (e) {
+    bad('前端测试异常中断', e && e.stack ? e.stack.split('\n')[0] : String(e));
+  }
+
+  console.log('\n[C] 结果');
+  console.log('  通过 ' + pass + ' 项，失败 ' + fail + ' 项');
+  if (fail) {
+    console.log('\n失败明细：');
+    failures.forEach((f) => console.log('  - ' + f));
+    process.exitCode = 1;
+  } else {
+    console.log('  全部通过 ✅');
+  }
+})();

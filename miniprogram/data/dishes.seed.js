@@ -1,0 +1,99 @@
+/**
+ * 家宴点菜 · 菜库种子数据
+ *
+ * 这是「我家厨房的菜单」——按主人自己的拿手菜整理。
+ *
+ * 字段说明：
+ *   category  决定朋友端点菜页的分类标签顺序（按 sort 升序出现）
+ *   limit     非 null 时是**全场总份数上限**（服务端强校验），用于一锅只出一份的菜
+ *   available 默认全部 false：菜库是"能做什么"，上架才是"今晚做什么"。
+ *             导入后要去「家宴设置与菜库」勾选今晚的菜（整组切换可以一次开一类）。
+ *   sort      每类之间留 100 的间隔，方便以后在中间插菜
+ */
+module.exports = [
+  /* ---------------- 猪肉 ---------------- */
+  { name: '红烧排骨', category: '猪肉', desc: '冰糖炒色慢火收汁，骨头都入味', emoji: '🍖', limit: null, tags: ['硬菜', '猪肉', '下饭'], sort: 10, available: false },
+  { name: '排骨汤', category: '猪肉', desc: '焯水后小火慢炖，汤色清亮不油', emoji: '🍲', limit: null, tags: ['汤', '猪肉', '清淡'], sort: 20, available: false },
+  { name: '话梅排骨', category: '猪肉', desc: '话梅的酸甜吊出肉香，解腻开胃', emoji: '🍖', limit: null, tags: ['猪肉', '解腻'], sort: 30, available: false },
+  { name: '红烧肉', category: '猪肉', desc: '五花三层，炖到入口即化', emoji: '🍖', limit: null, tags: ['硬菜', '猪肉', '下饭'], sort: 40, available: false },
+  { name: '爆炒猪心', category: '猪肉', desc: '大火快炒，脆嫩不老，配青椒最香', emoji: '🥩', limit: null, tags: ['猪肉', '下饭', '微辣'], sort: 50, available: false },
+  { name: '黄豆炖猪蹄', category: '猪肉', desc: '黄豆提前泡发，炖到脱骨', emoji: '🍲', limit: null, tags: ['硬菜', '汤', '猪肉'], sort: 60, available: false },
+  { name: '红烧蹄髈', category: '猪肉', desc: '整只慢炖两小时，皮糯肉酥', emoji: '🍖', limit: 1, tags: ['硬菜', '猪肉'], sort: 70, available: false },
+  { name: '萝卜炖猪蹄', category: '猪肉', desc: '白萝卜吸饱肉汤，比肉还抢手', emoji: '🍲', limit: null, tags: ['汤', '猪肉', '暖胃'], sort: 80, available: false },
+
+  /* ---------------- 鸡肉 ---------------- */
+  { name: '鸡汤', category: '鸡肉', desc: '老母鸡慢炖，只放姜和盐', emoji: '🍲', limit: null, tags: ['汤', '鸡肉', '暖胃'], sort: 110, available: false },
+  { name: '醋溜鸡', category: '鸡肉', desc: '酸香挂汁，鸡肉滑嫩开胃', emoji: '🍗', limit: null, tags: ['鸡肉', '下饭'], sort: 120, available: false },
+  { name: '黄焖鸡', category: '鸡肉', desc: '香菇青椒焖鸡腿，汤汁拌饭一绝', emoji: '🍗', limit: null, tags: ['鸡肉', '下饭', '硬菜'], sort: 130, available: false },
+  { name: '可乐鸡翅', category: '鸡肉', desc: '烧到浓稠收汁，甜咸黏嘴', emoji: '🍗', limit: null, tags: ['鸡肉', '儿童友好'], sort: 140, available: false },
+  { name: '香辣翅尖', category: '鸡肉', desc: '干辣椒炒香，越啃越停不下', emoji: '🍗', limit: null, tags: ['辣', '鸡肉', '酒搭'], sort: 150, available: false },
+  { name: '猪肚鸡', category: '鸡肉', desc: '猪肚与鸡同炖，胡椒提味汤白', emoji: '🍲', limit: null, tags: ['汤', '鸡肉', '暖胃', '硬菜'], sort: 160, available: false },
+  { name: '大盘鸡', category: '鸡肉', desc: '鸡块配土豆，最后下一把宽面', emoji: '🍗', limit: null, tags: ['辣', '鸡肉', '硬菜', '下饭'], sort: 170, available: false },
+  { name: '五指毛桃焗鸡', category: '鸡肉', desc: '带椰香药材焗出来的鸡格外清甜', emoji: '🍗', limit: 1, tags: ['鸡肉', '硬菜', '清淡'], sort: 180, available: false },
+
+  /* ---------------- 蔬菜 ---------------- */
+  { name: '清炒丝瓜', category: '蔬菜', desc: '滚刀块下锅，出锅前勾薄芡', emoji: '🥒', limit: null, tags: ['素', '清淡'], sort: 210, available: false },
+  { name: '蒜蓉空心菜', category: '蔬菜', desc: '大火爆炒，蒜香压住青味', emoji: '🥬', limit: null, tags: ['素', '清淡'], sort: 220, available: false },
+  { name: '清炒青菜', category: '蔬菜', desc: '断生就出锅，保持翠绿脆嫩', emoji: '🥬', limit: null, tags: ['素', '清淡'], sort: 230, available: false },
+  { name: '醋溜土豆丝', category: '蔬菜', desc: '切细丝泡去淀粉，酸辣脆爽', emoji: '🥔', limit: null, tags: ['素', '下饭', '微辣'], sort: 240, available: false },
+  { name: '醋溜白菜', category: '蔬菜', desc: '菜帮斜刀切片，醋香扑鼻', emoji: '🥬', limit: null, tags: ['素', '下饭', '清淡'], sort: 250, available: false },
+  { name: '干煸四季豆', category: '蔬菜', desc: '煸到起皱，肉末蒜末一起炒', emoji: '🫘', limit: null, tags: ['素', '下饭'], sort: 260, available: false },
+  { name: '油焖茭白', category: '蔬菜', desc: '滚刀块下锅，酱油糖焖到入味', emoji: '🌿', limit: null, tags: ['素', '清淡'], sort: 270, available: false },
+  { name: '鱼香茄子', category: '蔬菜', desc: '先煎后烧，酸甜微辣挂汁', emoji: '🍆', limit: null, tags: ['素', '下饭', '微辣'], sort: 280, available: false },
+  { name: '凉拌黄瓜', category: '蔬菜', desc: '拍碎更入味，蒜末香醋一拌', emoji: '🥒', limit: null, tags: ['素', '解腻', '清淡'], sort: 290, available: false },
+  { name: '手撕包菜', category: '蔬菜', desc: '手撕比刀切入味，干辣椒炝锅', emoji: '🥬', limit: null, tags: ['素', '下饭', '微辣'], sort: 300, available: false },
+  { name: '清炒冬瓜', category: '蔬菜', desc: '切片快炒，清淡解腻', emoji: '🍈', limit: null, tags: ['素', '清淡', '解腻'], sort: 310, available: false },
+
+  /* ---------------- 贝蟹虾 ---------------- */
+  { name: '盐水河虾', category: '贝蟹虾', desc: '只放姜葱和盐，吃的就是那口鲜', emoji: '🦐', limit: null, tags: ['海鲜', '清淡', '硬菜'], sort: 410, available: false },
+  { name: '白灼淡菜', category: '贝蟹虾', desc: '开口就捞，蘸姜醋汁', emoji: '🦪', limit: null, tags: ['海鲜', '清淡'], sort: 420, available: false },
+  { name: '葱油蛏子', category: '贝蟹虾', desc: '焯开后浇滚油葱丝', emoji: '🦪', limit: null, tags: ['海鲜', '清淡'], sort: 430, available: false },
+  { name: '辣炒蛤蜊', category: '贝蟹虾', desc: '干辣椒爆炒，开口即出锅', emoji: '🦪', limit: null, tags: ['海鲜', '微辣', '酒搭'], sort: 440, available: false },
+  { name: '清蒸梭子蟹', category: '贝蟹虾', desc: '对半开上锅，姜醋蘸着吃', emoji: '🦀', limit: null, tags: ['海鲜', '硬菜', '清淡'], sort: 450, available: false },
+  { name: '葱油梭子蟹', category: '贝蟹虾', desc: '蟹块蒸熟淋热油葱花', emoji: '🦀', limit: null, tags: ['海鲜', '硬菜'], sort: 460, available: false },
+  { name: '梭子蟹蒸蛋', category: '贝蟹虾', desc: '蟹肉蟹黄铺蛋液上，嫩滑鲜甜', emoji: '🦀', limit: null, tags: ['海鲜', '儿童友好'], sort: 470, available: false },
+
+  /* ---------------- 鱼类 ---------------- */
+  { name: '红烧鲫鱼', category: '鱼类', desc: '两面煎透再烧，汤汁浓稠', emoji: '🐟', limit: null, tags: ['海鲜', '下饭'], sort: 510, available: false },
+  { name: '清蒸鲈鱼', category: '鱼类', desc: '划刀蒸八分钟，淋一勺热油', emoji: '🐟', limit: null, tags: ['海鲜', '硬菜', '清淡'], sort: 520, available: false },
+  { name: '红烧带鱼', category: '鱼类', desc: '带鱼段煎到金黄，糖醋收汁', emoji: '🐟', limit: null, tags: ['海鲜', '下饭'], sort: 530, available: false },
+  { name: '雪菜大黄鱼', category: '鱼类', desc: '雪菜提鲜，蒜瓣肉一夹就散', emoji: '🐟', limit: null, tags: ['海鲜', '硬菜'], sort: 540, available: false },
+  { name: '红烧豆腐鱼', category: '鱼类', desc: '肉像豆腐一样嫩，一抿就化', emoji: '🐟', limit: null, tags: ['海鲜', '清淡'], sort: 550, available: false },
+  { name: '昂刺鱼豆腐汤', category: '鱼类', desc: '汤色奶白，鱼肉没有小刺', emoji: '🍲', limit: null, tags: ['汤', '海鲜', '暖胃'], sort: 560, available: false },
+  { name: '香煎青花鱼', category: '鱼类', desc: '鱼皮煎到焦脆，挤点柠檬', emoji: '🐟', limit: null, tags: ['海鲜', '下饭'], sort: 570, available: false },
+
+  /* ---------------- 主食 ---------------- */
+  { name: '米饭', category: '主食', desc: '新米现焖，粒粒分明', emoji: '🍚', limit: null, tags: ['主食'], sort: 610, available: false },
+  { name: '炒年糕', category: '主食', desc: '年糕片炒软，配青菜肉丝', emoji: '🍜', limit: null, tags: ['主食', '下饭'], sort: 620, available: false },
+  { name: '蒜蓉粉丝', category: '主食', desc: '粉丝垫底，蒜蓉蒸到入味', emoji: '🍜', limit: null, tags: ['主食', '清淡'], sort: 630, available: false },
+  { name: '炒饭', category: '主食', desc: '隔夜饭炒到颗颗分开', emoji: '🍚', limit: null, tags: ['主食'], sort: 640, available: false },
+
+  /* ---------------- 汤羹 ---------------- */
+  { name: '南瓜羹', category: '汤羹', desc: '蒸软打泥，加一点淡奶油更滑', emoji: '🎃', limit: null, tags: ['汤', '甜', '暖胃'], sort: 710, available: false },
+  { name: '紫菜蛋花汤', category: '汤羹', desc: '水开后淋蛋液，撒紫菜虾皮', emoji: '🍲', limit: null, tags: ['汤', '清淡'], sort: 720, available: false },
+  { name: '番茄鸡蛋汤', category: '汤羹', desc: '番茄炒出沙再加水，酸甜开胃', emoji: '🍲', limit: null, tags: ['汤', '清淡', '儿童友好'], sort: 730, available: false },
+
+  /* ---------------- 甜品 ---------------- */
+  { name: '桃胶银耳羹', category: '甜品', desc: '桃胶泡发一夜，炖到出胶', emoji: '🥣', limit: null, tags: ['甜', '解腻'], sort: 810, available: false },
+  { name: '双皮奶', category: '甜品', desc: '牛奶结两层皮，滑得像布丁', emoji: '🍮', limit: null, tags: ['甜', '儿童友好'], sort: 820, available: false },
+  { name: '冰豆花', category: '甜品', desc: '冰镇豆花淋红糖水', emoji: '🍧', limit: null, tags: ['甜', '解腻'], sort: 830, available: false },
+
+  /* ---------------- 饮品 ---------------- */
+  { name: '茶', category: '饮品', desc: '现泡的热茶，解腻', emoji: '🍵', limit: null, tags: ['解腻'], sort: 910, available: false },
+  { name: '可乐', category: '饮品', desc: '提前冰上', emoji: '🥤', limit: null, tags: ['儿童友好'], sort: 920, available: false },
+  { name: '雪碧', category: '饮品', desc: '冰镇加两片柠檬', emoji: '🥤', limit: null, tags: ['儿童友好'], sort: 930, available: false },
+  { name: '米酒', category: '饮品', desc: '自家酿的，微甜顺口', emoji: '🍶', limit: null, tags: ['酒搭', '甜'], sort: 940, available: false },
+  { name: '啤酒', category: '饮品', desc: '冰啤酒配硬菜', emoji: '🍺', limit: null, tags: ['酒搭'], sort: 950, available: false },
+  { name: '葡萄酒', category: '饮品', desc: '开一瓶配红肉', emoji: '🍷', limit: null, tags: ['酒搭'], sort: 960, available: false },
+
+  /* ---------------- 快手菜（应急加菜：冰箱常备，十分钟上桌） ---------------- */
+  { name: '番茄炒蛋', category: '快手菜', desc: '十分钟上桌，酸甜下饭不翻车', emoji: '🍅', limit: null, tags: ['快手', '素', '下饭'], sort: 1010, available: false },
+  { name: '葱花炒蛋', category: '快手菜', desc: '蛋液打散，炒到刚凝固就起锅', emoji: '🍳', limit: null, tags: ['快手', '素'], sort: 1020, available: false },
+  { name: '午餐肉煎蛋', category: '快手菜', desc: '罐头午餐肉切片煎香，配个煎蛋', emoji: '🥓', limit: null, tags: ['快手', '下饭'], sort: 1030, available: false },
+  { name: '香肠蒸饭', category: '快手菜', desc: '广式香肠切片铺饭上同蒸', emoji: '🍚', limit: null, tags: ['快手', '主食'], sort: 1040, available: false },
+  { name: '家常豆腐', category: '快手菜', desc: '嫩豆腐切块，酱油糖烧入味', emoji: '🍲', limit: null, tags: ['快手', '素', '下饭'], sort: 1050, available: false },
+  { name: '清汤挂面', category: '快手菜', desc: '一把挂面加青菜和蛋，五分钟', emoji: '🍜', limit: null, tags: ['快手', '主食'], sort: 1060, available: false },
+  { name: '速冻水饺', category: '快手菜', desc: '冰箱常备，煮开即食', emoji: '🥟', limit: null, tags: ['快手', '主食'], sort: 1070, available: false },
+  { name: '榨菜肉丝', category: '快手菜', desc: '榨菜丝和肉丝快炒，咸鲜下饭', emoji: '🥬', limit: null, tags: ['快手', '下饭'], sort: 1080, available: false },
+  { name: '泡面加蛋', category: '快手菜', desc: '真到山穷水尽时的最后一道防线', emoji: '🍜', limit: null, tags: ['快手', '主食'], sort: 1090, available: false }
+];

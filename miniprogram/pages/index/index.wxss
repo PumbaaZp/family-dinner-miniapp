@@ -1,0 +1,312 @@
+.page-with-footer {
+  padding-bottom: 180rpx;
+}
+
+.hero-links {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: 20rpx;
+}
+
+.hero-link {
+  font-size: 26rpx;
+  text-decoration: underline;
+  opacity: 0.95;
+  margin-right: 36rpx;
+}
+
+.empty-btn {
+  width: 400rpx;
+  margin: 28rpx auto 0;
+}
+
+/* 提示横幅 */
+.banner-closed {
+  margin-top: 20rpx;
+  background: #fff4e5;
+  color: #a35a12;
+  border-radius: 16rpx;
+  padding: 20rpx 24rpx;
+  font-size: 26rpx;
+  line-height: 1.5;
+}
+
+.banner-mine {
+  margin-top: 20rpx;
+  background: #eaf7ee;
+  color: #2f7a45;
+  border-radius: 16rpx;
+  padding: 20rpx 24rpx;
+  font-size: 26rpx;
+  line-height: 1.5;
+}
+
+/* 大家都在点什么（朋友之间互相可见） */
+.board {
+  background: #fff;
+  border-radius: 20rpx;
+  margin-top: 20rpx;
+  padding: 22rpx 24rpx;
+  box-shadow: 0 4rpx 16rpx rgba(120, 90, 70, 0.06);
+}
+
+.board-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.board-title {
+  font-size: 30rpx;
+  font-weight: 700;
+}
+
+.board-meta {
+  font-size: 22rpx;
+  color: #9c9089;
+}
+
+.board-empty {
+  margin-top: 16rpx;
+  font-size: 24rpx;
+  color: #a99d95;
+  line-height: 1.6;
+}
+
+.board-row {
+  display: flex;
+  align-items: center;
+  padding: 14rpx 0;
+  border-bottom: 2rpx solid #f7f3ee;
+}
+
+.board-row:last-child {
+  border-bottom: none;
+}
+
+.board-emoji {
+  font-size: 36rpx;
+  width: 56rpx;
+  text-align: center;
+  flex: none;
+}
+
+.board-main {
+  flex: 1;
+  min-width: 0;
+  padding-left: 8rpx;
+}
+
+.board-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.board-name {
+  font-size: 28rpx;
+  font-weight: 600;
+}
+
+.board-qty {
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #c9401f;
+  flex: none;
+  margin-left: 16rpx;
+}
+
+.board-who {
+  font-size: 22rpx;
+  color: #9c9089;
+  margin-top: 4rpx;
+}
+
+.board-people {
+  margin-top: 18rpx;
+  padding-top: 16rpx;
+  border-top: 2rpx solid #f2ece5;
+}
+
+.board-person {
+  padding: 8rpx 0;
+}
+
+.board-person-nick {
+  font-size: 26rpx;
+  font-weight: 600;
+}
+
+.board-person-items {
+  font-size: 24rpx;
+  color: #6d6058;
+  margin-top: 4rpx;
+  line-height: 1.5;
+}
+
+/* 分类 */
+.cats {
+  white-space: nowrap;
+  margin-top: 24rpx;
+}
+
+.cat {
+  display: inline-block;
+  padding: 14rpx 30rpx;
+  margin-right: 16rpx;
+  background: #fff;
+  border-radius: 999rpx;
+  font-size: 26rpx;
+  color: #6d6058;
+  box-shadow: 0 2rpx 10rpx rgba(120, 90, 70, 0.05);
+}
+
+.cat-on {
+  background: #2f2a26;
+  color: #fff;
+  font-weight: 600;
+}
+
+/* 菜品卡片 */
+.dish {
+  display: flex;
+  align-items: center;
+  background: #fff;
+  border-radius: 20rpx;
+  padding: 24rpx;
+  margin-top: 20rpx;
+  box-shadow: 0 4rpx 16rpx rgba(120, 90, 70, 0.06);
+}
+
+.dish-emoji {
+  font-size: 52rpx;
+  width: 76rpx;
+  text-align: center;
+  flex: none;
+}
+
+.dish-main {
+  flex: 1;
+  min-width: 0;
+  padding: 0 16rpx;
+}
+
+.dish-name {
+  font-size: 32rpx;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+}
+
+.dish-limit {
+  font-size: 20rpx;
+  color: #c9401f;
+  background: #fdecea;
+  border-radius: 6rpx;
+  padding: 2rpx 10rpx;
+  margin-left: 12rpx;
+  font-weight: 400;
+}
+
+.dish-desc {
+  font-size: 24rpx;
+  color: #9c9089;
+  margin-top: 8rpx;
+  line-height: 1.4;
+}
+
+.dish-tags {
+  margin-top: 12rpx;
+}
+
+/* 同 .input：原生 input 不能用垂直 padding，否则文字错位 */
+.dish-note {
+  margin-top: 14rpx;
+  background: #faf7f3;
+  border-radius: 10rpx;
+  height: 72rpx;
+  line-height: 72rpx;
+  padding: 0 16rpx;
+  font-size: 24rpx;
+}
+
+.dish-note-ph {
+  color: #bdb2aa;
+  font-size: 24rpx;
+}
+
+.stepper {
+  flex: none;
+}
+
+/* 底部 */
+.footer-btn {
+  width: 240rpx;
+  flex: none;
+}
+
+.count {
+  color: #c9401f;
+  font-size: 32rpx;
+}
+
+.footer-tip {
+  color: #4a8f5f;
+}
+
+.tips {
+  margin-top: 32rpx;
+  font-size: 24rpx;
+  color: #a99d95;
+  line-height: 1.6;
+  text-align: center;
+}
+
+/* 弹窗 */
+.mask {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: rgba(30, 20, 15, 0.45);
+  z-index: 50;
+}
+
+.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #fff;
+  border-radius: 28rpx 28rpx 0 0;
+  padding: 36rpx 32rpx calc(32rpx + env(safe-area-inset-bottom));
+  z-index: 60;
+}
+
+.sheet-title {
+  font-size: 36rpx;
+  font-weight: 700;
+}
+
+.sheet-sub {
+  font-size: 24rpx;
+  color: #9c9089;
+  margin: 8rpx 0 28rpx;
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sheet-actions {
+  display: flex;
+  gap: 20rpx;
+  margin-top: 12rpx;
+}
+
+.sheet-actions .btn {
+  flex: 1;
+}

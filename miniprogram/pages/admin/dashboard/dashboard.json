@@ -1,0 +1,6 @@
+{
+  "usingComponents": {},
+  "navigationBarTitleText": "后厨看板",
+  "enablePullDownRefresh": true,
+  "backgroundTextStyle": "dark"
+}

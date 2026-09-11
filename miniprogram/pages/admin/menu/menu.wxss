@@ -1,0 +1,151 @@
+.page-with-footer {
+  padding-bottom: 60rpx;
+}
+
+.row-2 {
+  display: flex;
+  gap: 20rpx;
+}
+
+/* 一行里左标签右开关 */
+.field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.no-margin {
+  margin-bottom: 0;
+}
+
+/* flex 子元素是外层 <picker>，所以 flex: 1 必须加在它身上，
+   加在内层 .picker 上是无效的（那正是之前两个框宽度对不齐的原因） */
+.picker-cell {
+  flex: 1;
+  min-width: 0;
+}
+
+.picker {
+  width: 100%;
+  background: #faf7f3;
+  border-radius: 12rpx;
+  padding: 18rpx 20rpx;
+  font-size: 28rpx;
+  text-align: center;
+}
+
+.actions {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 8rpx;
+}
+
+.actions .btn {
+  flex: 1;
+  font-size: 27rpx;
+}
+
+.link {
+  font-size: 26rpx;
+  color: #c9401f;
+  font-weight: 400;
+}
+
+/* 菜品行 */
+.drow {
+  display: flex;
+  align-items: center;
+  padding: 18rpx 0;
+  border-bottom: 2rpx solid #f7f3ee;
+}
+
+.drow:last-child {
+  border-bottom: none;
+}
+
+.drow-emoji {
+  font-size: 40rpx;
+  width: 56rpx;
+  text-align: center;
+  flex: none;
+}
+
+.drow-main {
+  flex: 1;
+  min-width: 0;
+  padding-left: 6rpx;
+}
+
+.drow-name {
+  font-size: 29rpx;
+  font-weight: 600;
+}
+
+.drow-desc {
+  font-size: 21rpx;
+  color: #a99d95;
+  margin-top: 2rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drow-limit {
+  display: flex;
+  align-items: center;
+  flex: none;
+  margin-right: 10rpx;
+}
+
+.limit-input {
+  /* flex 子元素默认 min-width: auto，input 的固有宽度会把格子撑开、挤走后面的开关，
+     所以这里显式压成 0 并自己定宽；
+     另外原生 input 不能用垂直 padding，否则文字错位，用 height 撑高 */
+  min-width: 0;
+  width: 84rpx;
+  height: 56rpx;
+  line-height: 56rpx;
+  background: #faf7f3;
+  border-radius: 8rpx;
+  padding: 0 6rpx;
+  font-size: 24rpx;
+  text-align: center;
+}
+
+.limit-label {
+  font-size: 22rpx;
+  color: #a99d95;
+  margin-left: 4rpx;
+}
+
+.drow-switch {
+  transform: scale(0.75);
+  flex: none;
+}
+
+.drow-del {
+  width: 56rpx;
+  text-align: center;
+  color: #c9bdb4;
+  font-size: 30rpx;
+  flex: none;
+}
+
+.code {
+  margin-top: 16rpx;
+  background: #fdf1ec;
+  border-radius: 12rpx;
+  padding: 24rpx;
+  text-align: center;
+  font-size: 40rpx;
+  font-weight: 700;
+  letter-spacing: 8rpx;
+  color: #c9401f;
+}
+
+.loading {
+  text-align: center;
+  color: #a99d95;
+  font-size: 26rpx;
+  padding: 40rpx;
+}

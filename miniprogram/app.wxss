@@ -1,0 +1,270 @@
+/* ============ 家宴点菜 · 全局样式（暖色家常风） ============ */
+
+page {
+  background: #f7f3ee;
+  color: #2f2a26;
+  font-size: 28rpx;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif;
+}
+
+/* 统一盒模型
+   小程序元素默认是 content-box，padding 会额外撑大宽度，
+   结果就是输入框比卡片宽、日期/时间选择框宽度互相对不齐。
+   统一成 border-box，并给输入框一个明确的 100% 宽度（class 上写了宽度的仍然以 class 为准）。 */
+view,
+input,
+textarea,
+picker,
+button,
+scroll-view {
+  box-sizing: border-box;
+}
+
+input,
+textarea {
+  width: 100%;
+}
+
+.page {
+  padding: 24rpx 24rpx 40rpx;
+  box-sizing: border-box;
+}
+
+/* 顶部横幅 */
+.hero {
+  background: linear-gradient(135deg, #e05a35 0%, #c9401f 100%);
+  border-radius: 24rpx;
+  padding: 32rpx;
+  color: #fff;
+  box-shadow: 0 10rpx 30rpx rgba(201, 64, 31, 0.25);
+}
+
+.hero-title {
+  font-size: 42rpx;
+  font-weight: 700;
+  letter-spacing: 2rpx;
+}
+
+.hero-sub {
+  margin-top: 12rpx;
+  font-size: 26rpx;
+  opacity: 0.92;
+  line-height: 1.5;
+}
+
+.hero-meta {
+  margin-top: 20rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.hero-chip {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 999rpx;
+  padding: 8rpx 20rpx;
+  font-size: 24rpx;
+}
+
+/* 卡片 */
+.card {
+  background: #fff;
+  border-radius: 20rpx;
+  padding: 24rpx;
+  margin-top: 20rpx;
+  box-shadow: 0 4rpx 16rpx rgba(120, 90, 70, 0.06);
+}
+
+.card-title {
+  font-size: 30rpx;
+  font-weight: 700;
+  margin-bottom: 16rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* 文本 */
+.muted {
+  color: #9c9089;
+  font-size: 24rpx;
+}
+
+.strong {
+  font-weight: 700;
+}
+
+.center {
+  text-align: center;
+}
+
+/* 按钮 */
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 84rpx;
+  border-radius: 16rpx;
+  font-size: 30rpx;
+  background: #fff;
+  color: #574a42;
+  border: 2rpx solid #eae1d8;
+  box-sizing: border-box;
+}
+
+.btn::after {
+  border: none;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #e05a35 0%, #c9401f 100%);
+  color: #fff;
+  border: none;
+  font-weight: 600;
+}
+
+.btn-ghost {
+  background: #fdf1ec;
+  color: #c9401f;
+  border: 2rpx solid #f6d9cf;
+}
+
+.btn-danger {
+  background: #fff;
+  color: #c0392b;
+  border: 2rpx solid #f0c9c2;
+}
+
+.btn-mini {
+  height: 60rpx;
+  font-size: 26rpx;
+  padding: 0 24rpx;
+  border-radius: 12rpx;
+  display: inline-flex;
+  width: auto;
+}
+
+.btn-disabled {
+  opacity: 0.5;
+}
+
+/* 标签 */
+.tag {
+  display: inline-block;
+  font-size: 20rpx;
+  color: #b06a3c;
+  background: #fdf2e7;
+  border-radius: 8rpx;
+  padding: 4rpx 12rpx;
+  margin-right: 10rpx;
+}
+
+.tag-hot {
+  color: #c9401f;
+  background: #fdecea;
+}
+
+/* 加减器 */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.stepper-btn {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 34rpx;
+  line-height: 1;
+  box-sizing: border-box;
+}
+
+.stepper-minus {
+  background: #fff;
+  border: 2rpx solid #e6ddd4;
+  color: #8a7d74;
+}
+
+.stepper-plus {
+  background: linear-gradient(135deg, #e05a35 0%, #c9401f 100%);
+  color: #fff;
+}
+
+.stepper-num {
+  min-width: 52rpx;
+  text-align: center;
+  font-size: 30rpx;
+  font-weight: 700;
+}
+
+/* 空状态 */
+.empty {
+  padding: 100rpx 40rpx;
+  text-align: center;
+  color: #a99d95;
+}
+
+.empty-emoji {
+  font-size: 90rpx;
+  display: block;
+  margin-bottom: 20rpx;
+}
+
+/* 底部固定条 */
+.footer-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #fff;
+  padding: 16rpx 24rpx calc(16rpx + env(safe-area-inset-bottom));
+  box-shadow: 0 -6rpx 24rpx rgba(120, 90, 70, 0.1);
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  z-index: 20;
+}
+
+.footer-info {
+  flex: 1;
+  font-size: 26rpx;
+  color: #6d6058;
+}
+
+/* 分割线 */
+.hr {
+  height: 2rpx;
+  background: #f2ece5;
+  margin: 20rpx 0;
+}
+
+/* 输入框 */
+/* 输入框
+   ⚠️ 小程序 <input> 是原生组件：**垂直方向的 padding 会让文字渲染错位**
+   （表现为文字掉到框下面一半，聚焦重绘后才正常）。
+   所以这里一律「显式 height + line-height + 只留水平 padding」，
+   不要在 input 上用 padding-top / padding-bottom。 */
+.input {
+  background: #faf7f3;
+  border-radius: 12rpx;
+  height: 88rpx;
+  line-height: 88rpx;
+  padding: 0 20rpx;
+  font-size: 28rpx;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.field-label {
+  font-size: 26rpx;
+  color: #7b6e66;
+  margin-bottom: 10rpx;
+}
+
+.field {
+  margin-bottom: 22rpx;
+}

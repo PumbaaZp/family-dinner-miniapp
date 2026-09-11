@@ -1,0 +1,108 @@
+<view class="page">
+
+  <!-- 顶部 -->
+  <view class="hero" wx:if="{{cfg}}">
+    <view class="hero-title">{{cfg.title}}</view>
+    <view class="hero-sub">
+      {{order ? '你的点单已提交，可以直接改' : '你还没点单，去点几道想吃的吧'}}
+    </view>
+    <view class="hero-meta">
+      <view class="hero-chip" wx:if="{{isAdmin}}">👑 主人</view>
+      <view class="hero-chip">🕒 截止 {{deadlineText}}</view>
+    </view>
+  </view>
+
+  <!-- 未开通 -->
+  <view class="card" wx:if="{{!loading && !inited}}">
+    <view class="card-title">家宴还没开通</view>
+    <view class="muted">第一次使用时，由主人点下面的按钮开通，再分享给朋友。</view>
+    <view class="btn btn-primary" style="margin-top:24rpx" bindtap="onBecomeAdmin">我是主人，一键开通</view>
+  </view>
+
+  <!-- 我的点单 -->
+  <block wx:if="{{inited}}">
+    <view class="card" wx:if="{{order}}">
+      <view class="card-title">
+        <text>我的点单</text>
+        <text class="muted">{{order.nick}}</text>
+      </view>
+
+      <view class="host-note" wx:if="{{hostNote}}">
+        ✏️ {{hostNote}}
+        <view class="host-note-tip">主人调整过你的点单。想改回来重新提交一次就行。</view>
+      </view>
+
+      <view class="meta-row">
+        <text class="meta-chip">👥 {{order.partySize}} 人</text>
+        <text class="meta-chip" wx:if="{{order.arriveAt}}">🕘 {{order.arriveAt}}</text>
+        <text class="meta-chip">🍽 {{order.totalQty}} 道</text>
+        <text class="meta-chip" wx:if="{{submittedAt}}">📝 {{submittedAt}}</text>
+      </view>
+
+      <view class="hr"></view>
+
+      <view class="mi" wx:for="{{items}}" wx:key="dishId">
+        <text class="mi-emoji">{{item.emoji}}</text>
+        <view class="mi-main">
+          <view class="mi-name">{{item.name}}</view>
+          <view class="mi-note" wx:if="{{item.note}}">备注：{{item.note}}</view>
+        </view>
+        <text class="mi-qty">×{{item.qty}}</text>
+      </view>
+
+      <view class="order-note" wx:if="{{order.note}}">整体备注：{{order.note}}</view>
+
+      <view class="actions">
+        <view class="btn btn-ghost" bindtap="goIndex">修改点单</view>
+        <view class="btn" bindtap="onCopy">复制文本</view>
+        <view class="btn btn-danger" bindtap="onCancel">撤销</view>
+      </view>
+    </view>
+
+    <view class="card" wx:else>
+      <view class="empty">
+        <text class="empty-emoji">🥢</text>
+        <view>还没有点单记录</view>
+      </view>
+      <view class="btn btn-primary" bindtap="goIndex">去点菜</view>
+    </view>
+
+    <!-- 主人区 -->
+    <view class="card" wx:if="{{isAdmin}}">
+      <view class="card-title">主人控制台</view>
+      <view class="entry" bindtap="goDashboard">
+        <text class="entry-emoji">📊</text>
+        <view class="entry-main">
+          <view class="entry-name">后厨看板</view>
+          <view class="entry-desc">谁点了什么、每道菜几份、一键复制给家人</view>
+        </view>
+        <text class="entry-arrow">›</text>
+      </view>
+      <view class="entry" bindtap="goMenu">
+        <text class="entry-emoji">📋</text>
+        <view class="entry-main">
+          <view class="entry-name">家宴设置与菜库</view>
+          <view class="entry-desc">改标题、截止时间、上架今晚的菜</view>
+        </view>
+        <text class="entry-arrow">›</text>
+      </view>
+      <view class="entry" bindtap="onCopyCode">
+        <text class="entry-emoji">🔑</text>
+        <view class="entry-main">
+          <view class="entry-name">主人口令：{{cfg.hostCode}}</view>
+          <view class="entry-desc">家人（如配偶）用它可以也成为主人，点一下复制</view>
+        </view>
+        <text class="entry-arrow">›</text>
+      </view>
+    </view>
+
+    <!-- 非主人 -->
+    <view class="card" wx:else>
+      <view class="card-title">你是客人身份</view>
+      <view class="muted">点菜、改单都没问题。如果你也是这次家宴的主人（比如帮忙备菜），可以输入主人口令提升权限。</view>
+      <view class="btn btn-ghost" style="margin-top:24rpx" bindtap="onBecomeAdmin">我是主人，输入口令</view>
+    </view>
+  </block>
+
+  <view class="tips">小提示：把小程序分享到群里，朋友点开就能看到菜单并点单。</view>
+</view>

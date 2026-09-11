@@ -1,0 +1,123 @@
+<view class="page page-with-footer">
+
+  <!-- 家宴设置 -->
+  <view class="card">
+    <view class="card-title">① 家宴设置</view>
+
+    <view class="field">
+      <view class="field-label">家宴标题</view>
+      <input class="input" value="{{form.title}}" data-key="title" bindinput="onFormInput" placeholder="周末家宴" />
+    </view>
+
+    <view class="field">
+      <view class="field-label">主人称呼</view>
+      <input class="input" value="{{form.host}}" data-key="host" bindinput="onFormInput" placeholder="老章" />
+    </view>
+
+    <view class="field">
+      <view class="field-label">地址（可选）</view>
+      <input class="input" value="{{form.address}}" data-key="address" bindinput="onFormInput" placeholder="滨江路 88 号 3 幢 1502" />
+    </view>
+
+    <view class="field">
+      <view class="field-label">给朋友的一句话</view>
+      <input class="input" value="{{form.notice}}" data-key="notice" bindinput="onFormInput" placeholder="随便点，冰箱管够" />
+    </view>
+
+    <view class="field">
+      <view class="field-row">
+        <view class="field-label no-margin">点单截止时间</view>
+        <switch checked="{{enableDeadline}}" color="#D9482B" bindchange="onToggleDeadline" />
+      </view>
+
+      <view class="muted" wx:if="{{!enableDeadline}}" style="margin-top:8rpx">
+        没开启：朋友随时能点、也能改单。
+      </view>
+
+      <block wx:else>
+        <view class="row-2" style="margin-top:12rpx">
+          <picker class="picker-cell" mode="date" value="{{dateStr}}" bindchange="onDateChange">
+            <view class="picker">{{dateStr}}</view>
+          </picker>
+          <picker class="picker-cell" mode="time" value="{{timeStr}}" bindchange="onTimeChange">
+            <view class="picker">{{timeStr}}</view>
+          </picker>
+        </view>
+        <view class="muted" style="margin-top:10rpx">到点后朋友只能看、不能改。当前：{{deadlineText}}</view>
+      </block>
+    </view>
+
+    <view class="field">
+      <view class="field-label">每单最多点几道（0 = 不限）</view>
+      <input class="input" type="number" value="{{form.maxDishesPerOrder}}" data-key="maxDishesPerOrder" bindinput="onFormInput" placeholder="0" />
+      <view class="muted" style="margin-top:8rpx">按「一次提交」算，不是按人数算。用来防止有人一口气点二十道。</view>
+    </view>
+
+    <view class="actions">
+      <view class="btn btn-ghost" wx:if="{{currentDeadlineTs}}" bindtap="onClearDeadline">取消截止</view>
+      <view class="btn btn-primary" bindtap="onSaveSettings">保存设置</view>
+    </view>
+  </view>
+
+  <!-- 菜库 -->
+  <view class="card">
+    <view class="card-title">
+      <text>② 今晚的菜单</text>
+      <text class="muted">已上架 {{onCount}} / {{total}}</text>
+    </view>
+    <view class="muted">朋友端只会看到「已上架」的菜。菜库有 36 道左右，每次家宴挑 10 来道即可。</view>
+
+    <view class="actions" style="margin-top:22rpx">
+      <view class="btn btn-ghost" bindtap="onImportSeed">导入内置菜库</view>
+      <view class="btn btn-ghost" bindtap="onResetSeed">重置为默认</view>
+    </view>
+    <view class="actions" style="margin-top:16rpx">
+      <view class="btn" bindtap="onAllOn">全部上架</view>
+      <view class="btn" bindtap="onAllOff">全部下架</view>
+      <view class="btn" bindtap="onAddDish">+ 新增</view>
+    </view>
+  </view>
+
+  <!-- 分组列表 -->
+  <view class="card" wx:for="{{groups}}" wx:key="category">
+    <view class="card-title">
+      <text>{{item.category}}（{{item.onCount}}/{{item.dishes.length}}）</text>
+      <text class="link" data-cat="{{item.category}}" bindtap="onToggleCategory">整组切换</text>
+    </view>
+
+    <view class="drow" wx:for="{{item.dishes}}" wx:for-item="d" wx:key="_id">
+      <text class="drow-emoji">{{d.emoji}}</text>
+      <view class="drow-main">
+        <view class="drow-name">{{d.name}}</view>
+        <view class="drow-desc">{{d.desc}}</view>
+      </view>
+      <view class="drow-limit">
+        <input
+          class="limit-input"
+          type="number"
+          value="{{d.limit}}"
+          placeholder="不限"
+          data-id="{{d._id}}"
+          bindblur="onLimitEdit"
+        />
+        <text class="limit-label">份</text>
+      </view>
+      <switch
+        class="drow-switch"
+        checked="{{d.available}}"
+        color="#D9482B"
+        data-id="{{d._id}}"
+        bindchange="onToggleDish"
+      />
+      <view class="drow-del" data-id="{{d._id}}" data-name="{{d.name}}" bindtap="onDeleteDish">✕</view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="card-title">③ 主人口令</view>
+    <view class="muted">家人（比如配偶）输入这个口令也能成为主人，一起看后厨汇总。</view>
+    <view class="code" bindtap="onCopyCode">{{hostCode}}　<text class="muted">点击复制</text></view>
+  </view>
+
+  <view class="loading" wx:if="{{loading}}">加载中…</view>
+</view>

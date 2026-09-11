@@ -1,0 +1,183 @@
+<view class="page page-with-footer">
+
+  <!-- 顶部横幅 -->
+  <view class="hero" wx:if="{{cfg}}">
+    <view class="hero-title">{{cfg.title}}</view>
+    <view class="hero-sub">{{cfg.notice || '想吃什么就点什么，随时可以改～'}}</view>
+    <view class="hero-meta">
+      <view class="hero-chip">🕒 截止 {{deadlineText}}</view>
+      <view class="hero-chip" wx:if="{{cfg.maxDishesPerOrder}}">每单最多 {{cfg.maxDishesPerOrder}} 道</view>
+      <view class="hero-chip" wx:if="{{cfg.address}}">📍 {{cfg.address}}</view>
+    </view>
+    <view class="hero-links" wx:if="{{isAdmin}}">
+      <text class="hero-link" bindtap="goMenu">家宴设置与菜库 ›</text>
+      <text class="hero-link" bindtap="goDashboard">后厨看板 ›</text>
+    </view>
+  </view>
+
+  <!-- 未初始化 -->
+  <view class="card" wx:if="{{!loading && !inited}}">
+    <view class="card-title">家宴还没开通</view>
+    <view class="muted">如果这是你（主人）第一次打开，点下面的按钮开通；然后把小程序分享给朋友就能点菜了。</view>
+    <view class="btn btn-primary" style="margin-top:24rpx" bindtap="onInitAsHost">我是主人，一键开通</view>
+  </view>
+
+  <!-- 已截止提示 -->
+  <view class="banner-closed" wx:if="{{inited && closed}}">
+    ⏰ 点单已截止（{{deadlineText}}），如需修改请直接联系主人
+  </view>
+
+  <!-- 已提交提示 -->
+  <view class="banner-mine" wx:if="{{inited && myOrder}}">
+    ✅ 你已经提交过了：{{myOrder.nick}} · {{myOrder.partySize}} 人 · {{myOrder.totalQty}} 道菜。改动后重新提交即可覆盖。
+  </view>
+
+  <!-- 大家都在点什么（朋友之间互相可见） -->
+  <view class="board" wx:if="{{inited}}">
+    <view class="board-head" bindtap="onToggleBoard">
+      <text class="board-title">👀 大家都在点什么</text>
+      <text class="board-meta">{{boardStats.orderCount}} 人已点 · 共 {{boardStats.totalDishes}} 道 {{boardOpen ? '收起 ▲' : '展开 ▼'}}</text>
+    </view>
+
+    <block wx:if="{{boardOpen}}">
+      <view class="board-empty" wx:if="{{!boardOrders.length}}">
+        还没有人点单——你可以第一个点，其他人就能看到你想吃什么了。
+      </view>
+
+      <block wx:else>
+        <view class="board-row" wx:for="{{boardTotals}}" wx:key="dishId">
+          <text class="board-emoji">{{item.emoji}}</text>
+          <view class="board-main">
+            <view class="board-line">
+              <text class="board-name">{{item.name}}</text>
+              <text class="board-qty">×{{item.qty}}</text>
+            </view>
+            <view class="board-who" wx:if="{{item.guestsText}}">{{item.guestsText}}</view>
+          </view>
+        </view>
+
+        <view class="board-people">
+          <view class="board-person" wx:for="{{boardOrders}}" wx:key="key">
+            <view class="board-person-nick">{{item.nick}}</view>
+            <view class="board-person-items">{{item.partySize}} 人 · {{item.itemsText}}</view>
+          </view>
+        </view>
+      </block>
+    </block>
+  </view>
+
+  <!-- 分类 -->
+  <scroll-view class="cats" scroll-x enable-flex wx:if="{{dishes.length > 1}}">
+    <view
+      class="cat {{activeCat === item ? 'cat-on' : ''}}"
+      wx:for="{{cats}}"
+      wx:key="*this"
+      data-cat="{{item}}"
+      bindtap="onCat"
+    >{{item}}</view>
+  </scroll-view>
+
+  <!-- 菜品列表 -->
+  <view class="dish" wx:for="{{shown}}" wx:key="_id">
+    <view class="dish-emoji">{{item.emoji}}</view>
+    <view class="dish-main">
+      <view class="dish-name">
+        {{item.name}}
+        <text class="dish-limit" wx:if="{{item.limit}}">限 {{item.limit}} 份</text>
+      </view>
+      <view class="dish-desc" wx:if="{{item.desc}}">{{item.desc}}</view>
+      <view class="dish-tags" wx:if="{{item.tags.length}}">
+        <text
+          class="tag {{t === '辣' || t === '微辣' ? 'tag-hot' : ''}}"
+          wx:for="{{item.tags}}"
+          wx:for-item="t"
+          wx:key="*this"
+        >{{t}}</text>
+      </view>
+      <input
+        wx:if="{{item.qty > 0}}"
+        class="dish-note"
+        value="{{item.note}}"
+        placeholder="备注：少辣 / 不要香菜 / 多放醋"
+        placeholder-class="dish-note-ph"
+        data-id="{{item._id}}"
+        bindinput="onNote"
+      />
+    </view>
+    <view class="stepper">
+      <view
+        class="stepper-btn stepper-minus"
+        wx:if="{{item.qty > 0}}"
+        data-id="{{item._id}}"
+        bindtap="onMinus"
+      >−</view>
+      <view class="stepper-num" wx:if="{{item.qty > 0}}">{{item.qty}}</view>
+      <view class="stepper-btn stepper-plus" data-id="{{item._id}}" bindtap="onPlus">+</view>
+    </view>
+  </view>
+
+  <!-- 空态 -->
+  <view class="empty" wx:if="{{inited && !dishes.length}}">
+    <text class="empty-emoji">🍳</text>
+    <view wx:if="{{isAdmin}}">今晚的菜还没上架。点下面的按钮，先「导入内置菜库」，再勾选今晚要做的菜。</view>
+    <view wx:else>主人还没上架今晚的菜，稍等片刻～</view>
+    <view class="btn btn-primary empty-btn" wx:if="{{isAdmin}}" bindtap="goMenu">去上架今晚的菜</view>
+  </view>
+
+  <view class="empty" wx:if="{{loading}}">
+    <text class="empty-emoji">🥢</text>
+    <view>正在上菜…</view>
+  </view>
+
+  <view class="tips" wx:if="{{inited && dishes.length}}">
+    小提示：左右滑动分类快速找菜；点「+」加菜，加了以后可以写口味备注。
+  </view>
+</view>
+
+<!-- 底部提交条 -->
+<view class="footer-bar" wx:if="{{inited}}">
+  <view class="footer-info">
+    已点 <text class="strong count">{{cartCount}}</text> 道
+    <text wx:if="{{myOrder}}" class="footer-tip"> · 已提交可修改</text>
+  </view>
+  <view class="btn btn-ghost btn-mini" wx:if="{{cartCount > 0}}" bindtap="onClearCart">清空</view>
+  <view class="btn btn-primary footer-btn" bindtap="onOpenSubmit">提交点单</view>
+</view>
+
+<!-- 提交弹窗 -->
+<view class="mask" wx:if="{{showSubmit}}" bindtap="onCloseSubmit"></view>
+<view class="sheet" wx:if="{{showSubmit}}">
+  <view class="sheet-title">确认你的点单</view>
+  <view class="sheet-sub">共 {{cartCount}} 道菜</view>
+
+  <view class="field">
+    <view class="field-label">你的称呼（主人要知道是谁点的）</view>
+    <input class="input" value="{{nick}}" placeholder="例如：老王" bindinput="onNickInput" />
+  </view>
+
+  <view class="field field-row">
+    <view class="field-label" style="margin:0">到场人数</view>
+    <view class="stepper">
+      <view class="stepper-btn stepper-minus" bindtap="onPartyMinus">−</view>
+      <view class="stepper-num">{{partySize}}</view>
+      <view class="stepper-btn stepper-plus" bindtap="onPartyPlus">+</view>
+    </view>
+  </view>
+
+  <view class="field">
+    <view class="field-label">预计到达（可选）</view>
+    <input class="input" value="{{arriveAt}}" placeholder="例如：18:00 到" bindinput="onArriveInput" />
+  </view>
+
+  <view class="field">
+    <view class="field-label">整体备注（可选）</view>
+    <input class="input" value="{{note}}" placeholder="例如：有一位不吃香菜，孩子怕辣" bindinput="onNoteInput" />
+  </view>
+
+  <view class="sheet-actions">
+    <view class="btn" bindtap="onCloseSubmit">再想想</view>
+    <view class="btn btn-primary {{submitting ? 'btn-disabled' : ''}}" bindtap="onSubmit">
+      {{submitting ? '提交中…' : '提交点单'}}
+    </view>
+  </view>
+</view>

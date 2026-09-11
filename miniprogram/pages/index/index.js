@@ -1,0 +1,455 @@
+const api = require('../../utils/api.js');
+const fmt = require('../../utils/format.js');
+
+const app = getApp();
+
+Page({
+  data: {
+    loading: true,
+    inited: false,
+    isAdmin: false,
+    cfg: null,
+    deadlineText: '',
+    closed: false,
+    dishes: [],
+    cats: ['全部'],
+    activeCat: '全部',
+    shown: [],
+    cartCount: 0,
+    myOrder: null,
+
+    showSubmit: false,
+    nick: '',
+    partySize: 2,
+    arriveAt: '',
+    note: '',
+    submitting: false,
+
+    // 「大家都在点什么」：朋友之间互相可见，不需要主人权限
+    boardOpen: false,
+    boardTotals: [],
+    boardOrders: [],
+    boardStats: { orderCount: 0, totalPeople: 0, totalDishes: 0 }
+  },
+
+  onLoad() {
+    this.cart = {}; // dishId -> qty
+    this.notes = {}; // dishId -> 备注
+    this.bootstrap();
+  },
+
+  onShow() {
+    if (!this._loaded) return;
+    // 主人可能在别的页面改了菜/截止时间，返回时同步一次
+    if (!this.data.inited) {
+      this.bootstrap(true);
+      return;
+    }
+    this.syncDeadline();
+    this.reloadMenu();
+    this.startDeadlineTick();
+  },
+
+  onHide() {
+    this.stopDeadlineTick();
+  },
+
+  onUnload() {
+    this.stopDeadlineTick();
+  },
+
+  /**
+   * 每 30 秒本地重算一次倒计时 / 是否已截止。
+   * 不请求网络，只重算显示：页面一直开着的话，到点会自动变成「已截止」，
+   * 不会出现"把整张单子填完、点提交才被服务端拒绝"的体验。
+   */
+  startDeadlineTick() {
+    this.stopDeadlineTick();
+    this.deadlineTimer = setInterval(() => {
+      this.syncDeadline();
+      // 展开着的时候顺手刷新「大家都在点什么」，别人刚点的也能看到
+      if (this.data.boardOpen) this.loadBoard(true);
+    }, 30000);
+  },
+
+  stopDeadlineTick() {
+    if (this.deadlineTimer) {
+      clearInterval(this.deadlineTimer);
+      this.deadlineTimer = null;
+    }
+  },
+
+  /** 轻量刷新菜单：不动购物车；被下架的菜要从购物车里剔除 */
+  async reloadMenu() {
+    try {
+      const res = await api.call('listDishes');
+      const dishes = res.dishes || [];
+      const cats = ['全部'];
+      dishes.forEach((d) => {
+        if (cats.indexOf(d.category) < 0) cats.push(d.category);
+      });
+
+      let pruned = 0;
+      Object.keys(this.cart).forEach((id) => {
+        if (!dishes.some((d) => d._id === id)) {
+          delete this.cart[id];
+          delete this.notes[id];
+          pruned += 1;
+        }
+      });
+
+      if (cats.indexOf(this.data.activeCat) < 0) this.setData({ activeCat: '全部' });
+      this.setData({ dishes, cats }, () => this.buildShown());
+      if (pruned) api.toast('有 ' + pruned + ' 道菜已被主人下架，已从你的点单里移除');
+    } catch (err) {
+      /* 静默失败即可，下拉刷新能重试 */
+    }
+  },
+
+  onPullDownRefresh() {
+    this.bootstrap(true).then(() => wx.stopPullDownRefresh());
+  },
+
+  onShareAppMessage() {
+    const cfg = this.data.cfg || {};
+    return {
+      title: (cfg.title || '家宴') + '点菜啦，你想吃什么？',
+      path: '/pages/index/index'
+    };
+  },
+
+  onShareTimeline() {
+    const cfg = this.data.cfg || {};
+    return { title: (cfg.title || '家宴') + '点菜啦，你想吃什么？' };
+  },
+
+  /* -------------------- 大家都在点什么 -------------------- */
+
+  onToggleBoard() {
+    const boardOpen = !this.data.boardOpen;
+    this.setData({ boardOpen });
+    if (boardOpen) this.loadBoard(); // 展开时才拉，省一次请求
+  },
+
+  /**
+   * 整理「大家都在点什么」的渲染数据。
+   * 唯一 key 用下标派生——昵称可能重复（两个人写成一样的名字），
+   * 直接拿昵称当 key 会让列表渲染复用错节点。
+   */
+  mapBoard(res) {
+    const totals = (res.dishTotals || []).map((t) => ({
+      dishId: t.dishId,
+      emoji: t.emoji || '🍽',
+      name: t.name,
+      qty: t.qty,
+      guestsText: (t.guests || []).join('、')
+    }));
+    const orders = (res.orders || []).map((o, idx) => ({
+      key: 'b' + idx,
+      nick: (o.nick || '匿名朋友') + (o.isHost ? '（主人）' : ''),
+      partySize: o.partySize,
+      itemsText: (o.items || []).map((it) => it.name + ' ×' + it.qty).join('、')
+    }));
+    return {
+      totals,
+      orders,
+      stats: res.stats || { orderCount: 0, totalPeople: 0, totalDishes: 0 }
+    };
+  },
+
+  async loadBoard(silent) {
+    try {
+      const res = await api.call('board');
+      const mapped = this.mapBoard(res);
+      this.setData({
+        boardTotals: mapped.totals,
+        boardOrders: mapped.orders,
+        boardStats: mapped.stats
+      });
+    } catch (err) {
+      if (!silent) api.toastErr(err);
+    }
+  },
+
+  /* -------------------- 数据加载 -------------------- */
+
+  async bootstrap(force) {
+    this.setData({ loading: true });
+    try {
+      const session = await app.ensureSession(!!force);
+      this.setData({ isAdmin: !!session.isAdmin });
+
+      if (!session.inited) {
+        this.setData({ loading: false, inited: false, cfg: null, dishes: [], shown: [], cartCount: 0 });
+        this._loaded = true;
+        return;
+      }
+
+      this.applyConfig(session.config);
+
+      const [menuRes, mineRes] = await Promise.all([api.call('listDishes'), api.call('myOrder')]);
+      const dishes = menuRes.dishes || [];
+      const cats = ['全部'];
+      dishes.forEach((d) => {
+        if (cats.indexOf(d.category) < 0) cats.push(d.category);
+      });
+
+      this.setData({ inited: true, dishes, cats, loading: false });
+      this._loaded = true;
+      this.startDeadlineTick();
+
+      if (mineRes.order) {
+        this.fillFromOrder(mineRes.order);
+      } else {
+        this.cart = {};
+        this.notes = {};
+        this.setData({ myOrder: null });
+        this.buildShown();
+      }
+    } catch (err) {
+      this._loaded = true;
+      this.setData({ loading: false });
+      api.toastErr(err);
+    }
+  },
+
+  applyConfig(cfg) {
+    const deadlineTs = cfg && cfg.deadlineTs ? Number(cfg.deadlineTs) : 0;
+    this.setData({
+      cfg: cfg || null,
+      deadlineText: deadlineTs ? fmt.fmtShort(deadlineTs) + '（' + fmt.countdown(deadlineTs) + '）' : '不限时间，随时可点',
+      closed: !!(deadlineTs && Date.now() > deadlineTs)
+    });
+  },
+
+  syncDeadline() {
+    const cfg = app.globalData.cfg || this.data.cfg;
+    if (cfg) this.applyConfig(cfg);
+  },
+
+  fillFromOrder(order) {
+    this.cart = {};
+    this.notes = {};
+    (order.items || []).forEach((it) => {
+      this.cart[it.dishId] = Number(it.qty) || 0;
+      if (it.note) this.notes[it.dishId] = it.note;
+    });
+    const nick = order.nick || wx.getStorageSync('nick') || '';
+    this.setData(
+      {
+        myOrder: order,
+        nick,
+        partySize: Number(order.partySize) || 2,
+        arriveAt: order.arriveAt || '',
+        note: order.note || ''
+      },
+      () => this.buildShown()
+    );
+  },
+
+  /** 根据分类 + 购物车生成渲染列表 */
+  buildShown() {
+    const { dishes, activeCat } = this.data;
+
+    // 先清掉购物车里"已经不在本次菜单上"的菜。
+    // 必须在这里做：fillFromOrder 是按订单灌回购物车的，如果那之后主人下架了某道菜，
+    // 购物车里会留着一个界面上不渲染的条目——底部计数会多算，提交时被服务端拒绝，
+    // 而朋友在界面上根本找不到那一行去减掉它。
+    const valid = {};
+    dishes.forEach((d) => {
+      valid[d._id] = true;
+    });
+    Object.keys(this.cart).forEach((id) => {
+      if (!valid[id]) {
+        delete this.cart[id];
+        delete this.notes[id];
+      }
+    });
+
+    const shown = dishes
+      .filter((d) => activeCat === '全部' || d.category === activeCat)
+      .map((d) => ({
+        _id: d._id,
+        name: d.name,
+        emoji: d.emoji || '🍽',
+        desc: d.desc || '',
+        category: d.category,
+        tags: d.tags || [],
+        limit: d.limit,
+        qty: this.cart[d._id] || 0,
+        note: this.notes[d._id] || ''
+      }));
+    // 合计必须按整个购物车算：只算当前分类的话，切到别的分类底部会错误显示"已点 0 道"
+    const cartCount = Object.keys(this.cart).reduce((s, id) => s + (this.cart[id] || 0), 0);
+    this.setData({ shown, cartCount });
+  },
+
+  /* -------------------- 交互 -------------------- */
+
+  onCat(e) {
+    const cat = e.currentTarget.dataset.cat;
+    this.setData({ activeCat: cat }, () => this.buildShown());
+  },
+
+  onPlus(e) {
+    if (this.data.closed) return api.toast('点单已经截止啦');
+    const id = e.currentTarget.dataset.id;
+    const next = Math.min(20, (this.cart[id] || 0) + 1);
+    this.cart[id] = next;
+    const max = Number((this.data.cfg && this.data.cfg.maxDishesPerOrder) || 0);
+    if (max > 0) {
+      const total = Object.keys(this.cart).reduce((s, k) => s + this.cart[k], 0);
+      if (total > max) {
+        this.cart[id] = next - 1;
+        this.buildShown();
+        return api.toast('每单最多点 ' + max + ' 道菜');
+      }
+    }
+    this.buildShown();
+  },
+
+  onMinus(e) {
+    const id = e.currentTarget.dataset.id;
+    const next = Math.max(0, (this.cart[id] || 0) - 1);
+    if (next === 0) {
+      delete this.cart[id];
+      delete this.notes[id];
+    } else {
+      this.cart[id] = next;
+    }
+    this.buildShown();
+  },
+
+  onNote(e) {
+    const id = e.currentTarget.dataset.id;
+    const v = String(e.detail.value || '');
+    if (v) this.notes[id] = v;
+    else delete this.notes[id];
+  },
+
+  onClearCart() {
+    api.confirm('清空当前已选的菜？（已提交的单不受影响）').then((ok) => {
+      if (!ok) return;
+      this.cart = {};
+      this.notes = {};
+      this.buildShown();
+    });
+  },
+
+  onOpenSubmit() {
+    // 页面可能已经开了很久，先用"现在"重新判定一次截止状态再决定要不要弹窗
+    this.syncDeadline();
+    if (this.data.closed) return api.toast('点单已经截止啦');
+    if (!this.data.cartCount) return api.toast('还没点菜呢，先点两道～');
+    const nick = this.data.nick || wx.getStorageSync('nick') || '';
+    this.setData({ showSubmit: true, nick });
+  },
+
+  onCloseSubmit() {
+    this.setData({ showSubmit: false });
+  },
+
+  onNickInput(e) {
+    this.setData({ nick: e.detail.value });
+  },
+
+  onArriveInput(e) {
+    this.setData({ arriveAt: e.detail.value });
+  },
+
+  onNoteInput(e) {
+    this.setData({ note: e.detail.value });
+  },
+
+  onPartyPlus() {
+    this.setData({ partySize: Math.min(30, this.data.partySize + 1) });
+  },
+
+  onPartyMinus() {
+    this.setData({ partySize: Math.max(1, this.data.partySize - 1) });
+  },
+
+  async onSubmit() {
+    if (this.data.submitting) return;
+    const nick = String(this.data.nick || '').trim();
+    if (!nick) return api.toast('先写个称呼吧，主人要知道是谁点的');
+
+    const items = Object.keys(this.cart)
+      .filter((id) => this.cart[id] > 0)
+      .map((id) => {
+        const dish = this.data.dishes.find((d) => d._id === id) || {};
+        return {
+          dishId: id,
+          name: dish.name || '',
+          emoji: dish.emoji || '',
+          qty: this.cart[id],
+          note: this.notes[id] || ''
+        };
+      });
+
+    if (!items.length) return api.toast('至少点一道菜');
+
+    this.setData({ submitting: true });
+    api.loading('提交中');
+    const wasExisting = !!(this.data.myOrder && this.data.myOrder.createdAt);
+    try {
+      await api.call('submitOrder', {
+        nick,
+        partySize: this.data.partySize,
+        arriveAt: this.data.arriveAt,
+        note: this.data.note,
+        items
+      });
+      wx.setStorageSync('nick', nick);
+      const mine = await api.call('myOrder');
+      api.hideLoading();
+      this.setData({ showSubmit: false, submitting: false });
+      if (mine.order) this.fillFromOrder(mine.order);
+      if (this.data.boardOpen) this.loadBoard(true); // 自己刚提交，顺手刷新"大家都在点什么"
+      api.toast(wasExisting ? '已更新你的点单' : '点单成功！', 'success');
+    } catch (err) {
+      api.hideLoading();
+      this.setData({ submitting: false });
+      api.toastErr(err);
+    }
+  },
+
+  async onInitAsHost() {
+    const ok = await api.confirm('你确定是这次家宴的主人吗？开通后你会成为管理员。');
+    if (!ok) return;
+    api.loading('开通中');
+    try {
+      await api.call('init', {});
+      const session = await app.refreshSession();
+      api.hideLoading();
+      this.bootstrap(true);
+
+      const code = (session && session.config && session.config.hostCode) || '';
+      wx.showModal({
+        title: '开通成功',
+        content:
+          '主人口令：' + code + '\n\n（配偶输这个口令也能成为主人，一起看汇总）\n\n接下来去「家宴设置与菜库」导入菜库、勾选今晚的菜。',
+        confirmText: '去设置菜库',
+        cancelText: '稍后',
+        success: (res) => {
+          if (res.confirm) this.goMenu();
+        }
+      });
+    } catch (err) {
+      api.hideLoading();
+      api.toastErr(err);
+    }
+  },
+
+  goMine() {
+    wx.switchTab({ url: '/pages/mine/mine' });
+  },
+
+  goDashboard() {
+    wx.navigateTo({ url: '/pages/admin/dashboard/dashboard' });
+  },
+
+  goMenu() {
+    wx.navigateTo({ url: '/pages/admin/menu/menu' });
+  }
+});

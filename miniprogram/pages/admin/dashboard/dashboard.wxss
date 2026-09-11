@@ -1,0 +1,247 @@
+.page-with-footer {
+  padding-bottom: 60rpx;
+}
+
+/* 统计格 */
+.stats {
+  display: flex;
+  margin-top: 20rpx;
+  background: #fff;
+  border-radius: 20rpx;
+  padding: 26rpx 0;
+  box-shadow: 0 4rpx 16rpx rgba(120, 90, 70, 0.06);
+}
+
+.stat {
+  flex: 1;
+  text-align: center;
+  border-right: 2rpx solid #f7f3ee;
+}
+
+.stat:last-child {
+  border-right: none;
+}
+
+.stat-num {
+  font-size: 44rpx;
+  font-weight: 700;
+  color: #c9401f;
+}
+
+.stat-label {
+  font-size: 22rpx;
+  color: #9c9089;
+  margin-top: 6rpx;
+}
+
+/* 菜品汇总 */
+.dt {
+  display: flex;
+  align-items: flex-start;
+  padding: 18rpx 0;
+  border-bottom: 2rpx solid #f7f3ee;
+}
+
+.dt:last-child {
+  border-bottom: none;
+}
+
+.dt-emoji {
+  font-size: 42rpx;
+  width: 60rpx;
+  text-align: center;
+  flex: none;
+}
+
+.dt-main {
+  flex: 1;
+  min-width: 0;
+  padding-left: 8rpx;
+}
+
+.dt-name {
+  font-size: 30rpx;
+  font-weight: 700;
+}
+
+.dt-limit {
+  font-size: 20rpx;
+  color: #c9401f;
+  background: #fdecea;
+  border-radius: 6rpx;
+  padding: 2rpx 10rpx;
+  margin-left: 10rpx;
+  font-weight: 400;
+}
+
+.dt-guests {
+  font-size: 23rpx;
+  color: #9c9089;
+  margin-top: 6rpx;
+}
+
+.dt-note {
+  font-size: 23rpx;
+  color: #b06a3c;
+  margin-top: 4rpx;
+}
+
+.dt-qty {
+  font-size: 34rpx;
+  font-weight: 700;
+  color: #c9401f;
+  flex: none;
+}
+
+/* 「不做」按钮：从所有订单里去掉这道菜 */
+.dt-drop {
+  flex: none;
+  margin-left: 16rpx;
+  font-size: 22rpx;
+  color: #c0392b;
+  border: 2rpx solid #f0c9c2;
+  border-radius: 8rpx;
+  padding: 6rpx 14rpx;
+  background: #fff;
+}
+
+/* 说明文字 */
+.hint {
+  font-size: 22rpx;
+  color: #a99d95;
+  line-height: 1.5;
+  margin: -6rpx 0 14rpx;
+}
+
+/* 按人明细 */
+.op {
+  padding: 22rpx 0;
+  border-bottom: 2rpx solid #f7f3ee;
+}
+
+.op:last-child {
+  border-bottom: none;
+}
+
+.op-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 12rpx;
+}
+
+.op-nick {
+  font-size: 32rpx;
+  font-weight: 700;
+}
+
+/* "主人自己的单" 标记 */
+.op-badge {
+  font-size: 20rpx;
+  font-weight: 400;
+  color: #a35a12;
+  background: #fff4e5;
+  border-radius: 6rpx;
+  padding: 2rpx 10rpx;
+  margin-left: 10rpx;
+}
+
+/* 自测单提醒 */
+.warn {
+  background: #fff4e5;
+  color: #a35a12;
+  border-radius: 12rpx;
+  padding: 16rpx 20rpx;
+  font-size: 24rpx;
+  line-height: 1.5;
+  margin-bottom: 16rpx;
+}
+
+.op-meta {
+  font-size: 22rpx;
+  color: #9c9089;
+}
+
+.op-item {
+  display: flex;
+  align-items: center;
+  padding: 8rpx 0 8rpx 16rpx;
+}
+
+.op-item-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.op-item-name {
+  font-size: 27rpx;
+  color: #453d37;
+}
+
+.op-item-note {
+  display: block;
+  font-size: 22rpx;
+  color: #b06a3c;
+  margin-top: 2rpx;
+}
+
+/* 每道菜右侧的三个操作：改份数 / 减一份 / 整条去掉 */
+.op-item-ops {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
+.op-qty-btn {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: #c9401f;
+  background: #fdf1ec;
+  border-radius: 8rpx;
+  padding: 4rpx 12rpx;
+  margin-left: 16rpx;
+}
+
+.op-op-btn {
+  font-size: 26rpx;
+  color: #8a7d74;
+  border: 2rpx solid #e6ddd4;
+  border-radius: 8rpx;
+  padding: 2rpx 12rpx;
+  margin-left: 10rpx;
+  min-width: 44rpx;
+  text-align: center;
+}
+
+.op-op-drop {
+  color: #c0392b;
+  border-color: #f0c9c2;
+}
+
+.op-note {
+  margin-top: 10rpx;
+  margin-left: 16rpx;
+  font-size: 23rpx;
+  color: #6d6058;
+  background: #faf7f3;
+  border-radius: 10rpx;
+  padding: 12rpx 16rpx;
+  line-height: 1.5;
+}
+
+.actions {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 22rpx;
+}
+
+.actions .btn {
+  flex: 1;
+}
+
+.loading {
+  text-align: center;
+  color: #a99d95;
+  font-size: 26rpx;
+  padding: 40rpx;
+}
