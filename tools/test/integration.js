@@ -99,6 +99,21 @@ async function runBackend() {
   r = await call('seedDishes', { dishes: SEED }, HOST);
   expect('重复导入不产生重复数据', r.ok && r.data.added === 0, JSON.stringify(r.data));
 
+  /* 只补食材：不能动上架状态与限量（老菜库升级用） */
+  await call('toggleDish', { id: (await call('listDishes', { all: true }, HOST)).data.dishes[0]._id, available: true }, HOST);
+  const beforeFill = (await call('listDishes', { all: true }, HOST)).data.dishes;
+  const sample = beforeFill.filter((d) => d.available)[0];
+  await call('updateDish', { id: sample._id, patch: { limit: 7 } }, HOST);
+  r = await call('seedDishes', { dishes: SEED, ingredientsOnly: true }, HOST);
+  expect('「补全食材」会报告补了多少道', r.ok && r.data.ingredientsFilled > 0, JSON.stringify(r.data));
+  const afterFill = (await call('listDishes', { all: true }, HOST)).data.dishes;
+  const same = afterFill.filter((d) => d._id === sample._id)[0];
+  expect('补全食材不动上架状态', same.available === true, JSON.stringify({ available: same.available }));
+  expect('补全食材不动限量', same.limit === 7, 'limit=' + same.limit);
+  expect('补全食材确实写进去了', Array.isArray(same.ingredients) && same.ingredients.length > 0, JSON.stringify(same.ingredients));
+  await call('updateDish', { id: sample._id, patch: { limit: null } }, HOST);
+  await call('batchToggle', { available: false }, HOST);
+
   r = await call('listDishes', {}, GUEST_B);
   expect('刚导入时朋友端看不到菜（菜库默认全部下架，等主人勾今晚的）', r.data.dishes.length === 0, '实际=' + r.data.dishes.length);
 
@@ -127,6 +142,51 @@ async function runBackend() {
 
   r = await call('toggleDish', { id: 'nope', available: true }, GUEST_C);
   expect('非管理员不能上下架', r.ok === false, r.msg);
+
+  /* --- 食材采购（依赖"菜已上架"） --- */
+  r = await call('summary', {}, GUEST_C);
+  expect('朋友看不到食材采购清单', r.ok === false && /权限/.test(r.msg), r.msg);
+
+  r = await call('summary', {}, HOST);
+  let shop = r.data.ingredients;
+  expect('汇总带出食材清单（按上架菜单聚合）', Array.isArray(shop) && shop.length > 0, '食材数=' + (shop && shop.length));
+  expect('每项食材都带"涉及哪些菜"和采购状态',
+    shop.every((i) => i.name && Array.isArray(i.dishes) && typeof i.purchased === 'boolean'),
+    JSON.stringify(shop[0]));
+  expect('食材统计字段正确',
+    r.data.ingredientStats.total === shop.length && r.data.ingredientStats.missing === shop.length && r.data.ingredientStats.purchased === 0,
+    JSON.stringify(r.data.ingredientStats));
+  expect('汇总里每道菜也带了自己的食材（导出"菜+食材"要用）',
+    r.data.dishTotals.every((t) => Array.isArray(t.ingredients)),
+    JSON.stringify(r.data.dishTotals[0] && r.data.dishTotals[0].ingredients));
+
+  const ing0 = shop[0].name;
+  r = await call('toggleIngredient', { name: ing0, purchased: true }, GUEST_C);
+  expect('非管理员不能勾选采购', r.ok === false && /权限/.test(r.msg), r.msg);
+  r = await call('toggleIngredient', { purchased: true }, HOST);
+  expect('缺食材名会被拒绝', r.ok === false && /食材/.test(r.msg), r.msg);
+
+  r = await call('toggleIngredient', { name: ing0, purchased: true }, HOST);
+  expect('勾选已采购成功', r.ok && r.data.purchased === true, JSON.stringify(r.data));
+  r = await call('summary', {}, HOST);
+  const after = r.data.ingredients.filter((i) => i.name === ing0)[0];
+  expect('采购状态被保存下来', !!after && after.purchased === true, JSON.stringify(after));
+  expect('已采购的统计正确',
+    r.data.ingredientStats.purchased === 1 && r.data.ingredientStats.missing === r.data.ingredientStats.total - 1,
+    JSON.stringify(r.data.ingredientStats));
+  expect('已采购的排到清单最后（买菜先看缺的）',
+    r.data.ingredients[r.data.ingredients.length - 1].name === ing0,
+    r.data.ingredients.map((i) => i.name + (i.purchased ? '(已购)' : '')).slice(-3).join(','));
+
+  r = await call('toggleIngredient', { name: ing0, purchased: false }, HOST);
+  expect('取消勾选成功', r.ok && r.data.purchased === false, JSON.stringify(r.data));
+  r = await call('toggleIngredient', { name: ing0, purchased: true }, HOST);
+  r = await call('resetShopping', {}, GUEST_C);
+  expect('非管理员不能清空勾选', r.ok === false, r.msg);
+  r = await call('resetShopping', {}, HOST);
+  expect('清空采购勾选', r.ok && r.data.cleared === 1, JSON.stringify(r.data));
+  r = await call('summary', {}, HOST);
+  expect('清空后没有已采购项', r.data.ingredientStats.purchased === 0, JSON.stringify(r.data.ingredientStats));
 
   /* 限量：自己设一个，不依赖种子数据里恰好有没有限量菜 */
   const allDishes = (await call('listDishes', { all: true }, HOST)).data.dishes;
@@ -516,10 +576,10 @@ async function loadPages() {
 
   /* 页面方法齐全性 */
   const expectMethods = {
-    index: ['bootstrap', 'buildShown', 'onPlus', 'onMinus', 'onNote', 'onSubmit', 'onClearCart', 'reloadMenu', 'onInitAsHost', 'goMenu', 'goDashboard', 'onHide', 'onUnload', 'startDeadlineTick', 'stopDeadlineTick', 'onToggleBoard', 'loadBoard', 'mapBoard'],
+    index: ['bootstrap', 'buildShown', 'buildCats', 'dishRow', 'spyCat', 'measureSections', 'onPageScroll', 'onPlus', 'onMinus', 'onNote', 'onSubmit', 'onClearCart', 'reloadMenu', 'onInitAsHost', 'goMenu', 'goDashboard', 'onHide', 'onUnload', 'startDeadlineTick', 'stopDeadlineTick', 'onToggleBoard', 'loadBoard', 'mapBoard'],
     mine: ['refresh', 'applyOrder', 'onCancel', 'onCopy', 'onBecomeAdmin'],
-    menu: ['load', 'buildGroups', 'onToggleDish', 'onToggleCategory', 'batchAll', 'onLimitEdit', 'onImportSeed', 'onSaveSettings', 'onClearDeadline', 'onToggleDeadline'],
-    dashboard: ['load', 'buildText', 'mapOrders', 'onCopy', 'previewText', 'onRefresh', 'onShow', 'onHide', 'onUnload', 'startAutoRefresh', 'scheduleRefresh', 'stopAutoRefresh', 'onDropDish', 'onDropOrderItem', 'dropDish', 'onDecItem', 'onEditItemQty', 'setItemQty']
+    menu: ['load', 'buildGroups', 'onToggleDish', 'onToggleCategory', 'batchAll', 'onLimitEdit', 'onImportSeed', 'onFillIngredients', 'onSaveSettings', 'onClearDeadline', 'onToggleDeadline'],
+    dashboard: ['load', 'mapOrders', 'mapIngredients', 'groupByCat', 'buildMenuText', 'buildDishIngredientText', 'buildShoppingText', 'copyText', 'onCopyMenu', 'onCopyDishIngredient', 'onCopyShopping', 'onToggleIngredient', 'onResetShopping', 'previewText', 'onRefresh', 'onShow', 'onHide', 'onUnload', 'startAutoRefresh', 'scheduleRefresh', 'stopAutoRefresh', 'onDropDish', 'onDropOrderItem', 'dropDish', 'onDecItem', 'onEditItemQty', 'setItemQty']
   };
   Object.keys(expectMethods).forEach((key) => {
     const page = loaded[key];
@@ -546,14 +606,58 @@ async function loadPages() {
         Object.assign(this.data, d);
       }
     };
+    // 页面对象上这几个方法本来就在一起（buildShown 会调 this.dishRow），假 ctx 也要照做
+    ctx.buildShown = loaded.index.buildShown;
+    ctx.buildCats = loaded.index.buildCats;
+    ctx.dishRow = loaded.index.dishRow;
     loaded.index.buildShown.call(ctx);
-    expect('购物车：全部显示 3 道菜', ctx.data.shown.length === 3, 'shown=' + ctx.data.shown.length);
+    const dishesOnly = ctx.data.shown.filter((s) => s.type === 'dish');
+    const headers = ctx.data.shown.filter((s) => s.type === 'header');
+    expect('购物车：全部显示 3 道菜', dishesOnly.length === 3, 'shown=' + dishesOnly.length);
     expect('购物车：合计 3 份', ctx.data.cartCount === 3, 'cartCount=' + ctx.data.cartCount);
-    expect('购物车：备注回填到菜品', ctx.data.shown[0].note === '多放糖', JSON.stringify(ctx.data.shown[0].note));
+    expect('购物车：备注回填到菜品', dishesOnly[0].note === '多放糖', JSON.stringify(dishesOnly[0].note));
+
+    /* 分组标题：选「全部」时每类菜前插一条，否则一路划下来所有菜连成一片 */
+    expect('全部时插入了分组标题', headers.length === 2, JSON.stringify(headers.map((h) => h.name)));
+    expect('分组标题按分类顺序排列', headers[0].name === '热菜' && headers[1].name === '凉菜', JSON.stringify(headers.map((h) => h.name)));
+    expect('分组标题带该分类的菜数', headers[0].count === 2 && headers[1].count === 1, JSON.stringify(headers));
+    expect('分组标题后面紧跟它自己的菜',
+      ctx.data.shown[0].type === 'header' && ctx.data.shown[1].name === '红烧肉' && ctx.data.shown[3].type === 'header' && ctx.data.shown[4].name === '拍黄瓜',
+      JSON.stringify(ctx.data.shown.map((s) => s.name)));
+    expect('每行都有唯一 key（标题和菜品混在一起也不能重复）',
+      new Set(ctx.data.shown.map((s) => s.key)).size === ctx.data.shown.length,
+      ctx.data.shown.map((s) => s.key).join(','));
+
+    /* 分类标签：带每类菜数 */
+    const catData = loaded.index.buildCats(ctx.data.dishes);
+    expect('分类标签第一项是「全部」且带总数',
+      catData[0].name === '全部' && catData[0].count === 3, JSON.stringify(catData));
+    expect('分类标签带各自菜数',
+      catData.length === 3 && catData[1].name === '热菜' && catData[1].count === 2 && catData[2].count === 1,
+      JSON.stringify(catData));
+
+    /* 滚动联动：吸顶栏的高亮要跟着"当前看到的分类"走 */
+    const sections = [
+      { name: '热菜', top: 500 },
+      { name: '凉菜', top: 1200 }
+    ];
+    const spy = (top, sticky) => loaded.index.spyCat(sections, top, sticky);
+    expect('滚动联动：还在页面最上面时高亮「全部」', spy(0, 100) === '全部', spy(0, 100));
+    expect('滚动联动：还没滚到第一个分组标题前仍是「全部」', spy(380, 100) === '全部', spy(380, 100));
+    expect('滚动联动：越过第一个分组标题就切到该类', spy(400, 100) === '热菜', spy(400, 100));
+    expect('滚动联动：继续往下滚就换成后一类的标题', spy(1150, 100) === '凉菜', spy(1150, 100));
+    expect('滚动联动：吸顶栏自身高度算进判定（不会慢一拍）',
+      loaded.index.spyCat([{ name: '热菜', top: 500 }], 400, 0) === '全部' &&
+        loaded.index.spyCat([{ name: '热菜', top: 500 }], 400, 100) === '热菜',
+      '吸顶高度 0/100 的结果应不同');
+    expect('滚动联动：选了具体分类（没有分组标题）时始终「全部」',
+      loaded.index.spyCat([], 9999, 100) === '全部' && loaded.index.spyCat(null, 0, 0) === '全部');
 
     ctx.data.activeCat = '凉菜';
     loaded.index.buildShown.call(ctx);
-    expect('分类筛选只显示该类的菜', ctx.data.shown.length === 1 && ctx.data.shown[0].name === '拍黄瓜');
+    expect('选中具体分类时不插标题、只显示该类',
+      ctx.data.shown.length === 1 && ctx.data.shown[0].type === 'dish' && ctx.data.shown[0].name === '拍黄瓜',
+      JSON.stringify(ctx.data.shown.map((s) => s.name)));
     expect('分类筛选时合计份数不变（3 份）', ctx.data.cartCount === 3, 'cartCount=' + ctx.data.cartCount);
 
     /* 回归：主人下架某道菜后，朋友购物车里的它必须被清掉
@@ -566,7 +670,8 @@ async function loadPages() {
     expect('已下架的菜被剔出购物车：条目和备注都清掉',
       ctx.cart.d9 === undefined && ctx.notes.d9 === undefined,
       JSON.stringify({ cart: ctx.cart, notes: ctx.notes }));
-    expect('剔除后仍能正常渲染菜单', ctx.data.shown.length === 3, 'shown=' + ctx.data.shown.length);
+    expect('剔除后仍能正常渲染菜单', ctx.data.shown.filter((s) => s.type === 'dish').length === 3,
+      'dish 行数=' + ctx.data.shown.filter((s) => s.type === 'dish').length);
 
     /* 「大家都在点什么」：朋友之间互相可见的那份数据的整理 */
     const bd = loaded.index.mapBoard({
@@ -740,48 +845,44 @@ async function loadPages() {
   expect('份数解析：超过 99 夹到 99', fmtUtil.parseQtyInput('200') === 99);
   expect('份数解析：小数向下取整', fmtUtil.parseQtyInput('2.9') === 2);
 
-  /* 看板复制文本 */
+  /* 三种导出（都不含"谁点的"） */
   if (loaded.dashboard) {
-    const text = loaded.dashboard.buildText(
-      { title: '周末家宴' },
-      { stats: { orderCount: 2, totalPeople: 5, totalDishes: 7, dishKindCount: 3 } },
-      [
-        { emoji: '🍖', name: '红烧肉', qty: 3, guestsText: '老王、小李', notes: ['老王：多放糖'], limitText: '' },
-        { emoji: '🥟', name: '手工水饺', qty: 2, guestsText: '小李', notes: [], limitText: '限 4 份' }
-      ],
-      [
-        {
-          nick: '老王',
-          partySize: 3,
-          arriveAt: '18:00',
-          note: '一个不吃香菜',
-          totalQty: 4,
-          items: [
-            { name: '红烧肉', qty: 2, note: '多放糖' },
-            { name: '白灼虾', qty: 2, note: '' }
-          ]
-        },
-        {
-          nick: '主人自测',
-          partySize: 1,
-          arriveAt: '',
-          note: '',
-          totalQty: 1,
-          isHost: true,
-          items: [{ name: '拍黄瓜', qty: 1, note: '' }]
-        }
-      ]
-    );
-    expect('复制文本：含标题与总览', text.indexOf('周末家宴 点单汇总') >= 0 && text.indexOf('到场约 5 人') >= 0);
-    expect('复制文本：含菜品清单与份数', text.indexOf('【菜品清单】') >= 0 && text.indexOf('红烧肉 ×3 —— 老王、小李') >= 0);
-    expect('复制文本：含每道菜的口味备注', text.indexOf('↳ 老王：多放糖') >= 0);
-    expect('复制文本：含按人明细与到场时间', text.indexOf('老王（3 人，18:00 到）') >= 0);
-    expect('复制文本：含忌口备注', text.indexOf('备注：一个不吃香菜') >= 0);
-    expect('复制文本：主人自己的单会被标出来', text.indexOf('主人自测（1 人） ← 主人自己的单') >= 0,
-      text.split('\n').filter((l) => l.indexOf('主人自测') >= 0).join(' | '));
+    const totals = [
+      { dishId: 'd1', name: '红烧肉', qty: 3, category: '猪肉', guestsText: '老王、小李', ingredients: ['五花肉', '冰糖', '生抽'] },
+      { dishId: 'd2', name: '清炒丝瓜', qty: 1, category: '蔬菜', guestsText: '小李', ingredients: ['丝瓜', '大蒜'] }
+    ];
 
-    const empty = loaded.dashboard.buildText({ title: '家宴' }, { stats: {} }, [], []);
-    expect('复制文本：无人点单时给出占位提示', empty.indexOf('（还没有人点单）') >= 0);
+    const menuText = loaded.dashboard.buildMenuText({ title: '周末家宴', address: '3 幢 1502' }, totals);
+    expect('菜单清单：含标题、地址与分类', menuText.indexOf('周末家宴 · 菜单') >= 0 && menuText.indexOf('3 幢 1502') >= 0 && menuText.indexOf('【猪肉】') >= 0 && menuText.indexOf('【蔬菜】') >= 0, menuText);
+    expect('菜单清单：只有菜名，不带份数', menuText.indexOf('· 红烧肉') >= 0 && menuText.indexOf('×3') < 0, menuText);
+    expect('菜单清单：结尾给出总道数', menuText.indexOf('共 2 道菜') >= 0, menuText);
+    expect('菜单清单：无人点单/未定菜时不崩', loaded.dashboard.buildMenuText({}, []).indexOf('（还没有确定菜品）') >= 0);
+
+    const diText = loaded.dashboard.buildDishIngredientText({ title: '周末家宴' }, totals);
+    expect('菜+食材：每道菜带份数与食材', diText.indexOf('红烧肉 ×3') >= 0 && diText.indexOf('食材：五花肉、冰糖、生抽') >= 0, diText);
+    expect('菜+食材：没配食材的菜有占位提示',
+      loaded.dashboard.buildDishIngredientText({}, [{ name: '神秘菜', qty: 1, category: '其他' }]).indexOf('（还没配食材）') >= 0);
+
+    const ingList = loaded.dashboard.mapIngredients([
+      { name: '五花肉', purchased: false, dishes: ['红烧肉'] },
+      { name: '冰糖', purchased: true, dishes: ['红烧肉', '话梅排骨'] }
+    ]);
+    expect('食材清单：整理成渲染数据（带涉及哪些菜）',
+      ingList[0].name === '五花肉' && ingList[0].dishesText === '红烧肉' && ingList[0].purchased === false && ingList[1].purchased === true,
+      JSON.stringify(ingList));
+
+    const shopText = loaded.dashboard.buildShoppingText({ title: '周末家宴' }, ingList);
+    expect('待购清单：只列还没买的', shopText.indexOf('· 五花肉') >= 0 && shopText.indexOf('· 冰糖') < 0, shopText);
+    expect('待购清单：给出还缺几项', shopText.indexOf('还缺 1 项') >= 0 && shopText.indexOf('已采购 1 项') >= 0, shopText);
+    expect('待购清单：全买完时给明确提示',
+      loaded.dashboard.buildShoppingText({}, [{ name: '冰糖', purchased: true }]).indexOf('全部 1 项都已采购') >= 0);
+    expect('待购清单：没有食材时不崩',
+      loaded.dashboard.buildShoppingText({}, []).indexOf('（还没有食材清单）') >= 0);
+
+    /* 用户明确要求：复制内容不关心"谁点的" */
+    expect('三种导出都不含谁点的（回归点）',
+      [menuText, diText, shopText].every((t) => t.indexOf('老王') < 0 && t.indexOf('小李') < 0 && t.indexOf('按人明细') < 0 && t.indexOf('主人自己的单') < 0),
+      'menu/di/shop 三种文本里都不该出现点单人');
 
     /* 按人明细的渲染 key：昵称可能重复，key 必须唯一（不能用昵称当 key） */
     const mapped = loaded.dashboard.mapOrders([

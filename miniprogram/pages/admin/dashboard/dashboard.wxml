@@ -125,13 +125,53 @@
   </view>
 
   <view class="card">
-    <view class="card-title">一键复制</view>
-    <view class="muted">复制成纯文本，直接粘到家庭群，或者给帮忙备菜的家人看。</view>
-    <view class="actions">
-      <view class="btn btn-ghost" bindtap="previewText">预览文本</view>
-      <view class="btn btn-primary" bindtap="onCopy">复制汇总</view>
+    <view class="card-title">导出 / 复制</view>
+    <view class="muted">三种清单各复制各的，都不含「谁点的」。</view>
+
+    <view class="actions" style="margin-top:20rpx">
+      <view class="btn btn-primary" bindtap="onCopyMenu">复制菜单（发客人）</view>
     </view>
-    <view class="btn" style="margin-top:16rpx" bindtap="onRefresh">刷新数据</view>
+    <view class="actions" style="margin-top:16rpx">
+      <view class="btn btn-ghost" bindtap="onCopyDishIngredient">复制菜 + 食材</view>
+      <view class="btn btn-ghost" bindtap="onCopyShopping">复制待购食材</view>
+    </view>
+    <view class="actions" style="margin-top:16rpx">
+      <view class="btn" bindtap="previewText">预览上次复制的</view>
+      <view class="btn" bindtap="onRefresh">刷新数据</view>
+    </view>
+  </view>
+
+  <!-- 食材采购 -->
+  <view class="card" wx:if="{{ingredientStats.total}}">
+    <view class="card-title">
+      <text>食材采购</text>
+      <text class="muted">还缺 {{ingredientStats.missing}} / {{ingredientStats.total}}</text>
+    </view>
+    <view class="hint">买到了就点一下划掉。勾选会保存，下次家宴可以「清空勾选」复用。</view>
+
+    <view
+      class="ing"
+      wx:for="{{ingredients}}"
+      wx:key="key"
+      data-name="{{item.name}}"
+      data-purchased="{{item.purchased ? 'off' : 'on'}}"
+      bindtap="onToggleIngredient"
+    >
+      <view class="ing-box {{item.purchased ? 'ing-box-on' : ''}}">
+        <text wx:if="{{item.purchased}}">✓</text>
+      </view>
+      <view class="ing-main">
+        <view class="ing-name {{item.purchased ? 'ing-done' : ''}}">{{item.name}}</view>
+        <view class="ing-dishes" wx:if="{{item.dishesText}}">{{item.dishesText}}</view>
+      </view>
+    </view>
+
+    <view class="btn" style="margin-top:22rpx" bindtap="onResetShopping">清空采购勾选</view>
+  </view>
+
+  <view class="card" wx:else>
+    <view class="card-title">食材采购</view>
+    <view class="muted">菜单里的菜还没有食材配置，所以这里是空的。食材来自每道菜的「食材」字段。</view>
   </view>
 
   <view class="loading" wx:if="{{loading}}">正在统计…</view>

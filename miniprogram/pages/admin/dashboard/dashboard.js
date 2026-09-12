@@ -19,7 +19,17 @@ Page({
     deadlineText: '',
     closed: false,
     updatedAt: '',
-    hasHostOrder: false
+    hasHostOrder: false,
+
+    // 家宴标题（导出清单时用作标题）
+    title: '',
+    // 食材清单（含"是否已采购"）+ 统计
+    ingredients: [],
+    ingredientStats: { total: 0, missing: 0, purchased: 0 },
+    // 三种导出的文本，load 时生成好，点按钮直接复制
+    menuText: '',
+    dishIngText: '',
+    shopText: ''
   },
 
   onShow() {
@@ -92,26 +102,42 @@ Page({
         category: t.category,
         qty: t.qty,
         limit: t.limit,
+        ingredients: t.ingredients || [],
         limitText: t.limit ? '限 ' + t.limit + ' 份' : '',
         guestsText: (t.guests || []).join('、'),
         notes: t.notes || []
       }));
 
       const orders = this.mapOrders(res.orders);
+      const ingredients = this.mapIngredients(res.ingredients);
 
       const now = new Date();
-      this.setData({
+      const patch = {
         loading: false,
         isAdmin: true,
+        title: cfg.title || '家宴',
         stats: res.stats || this.data.stats,
         dishTotals,
         orders,
         hasHostOrder: orders.some((o) => o.isHost),
+        ingredientStats: res.ingredientStats || { total: 0, missing: 0, purchased: 0 },
         deadlineText: deadlineTs ? fmt.fmtShort(deadlineTs) + '（' + fmt.countdown(deadlineTs) + '）' : '不限时间',
         closed: !!(deadlineTs && Date.now() > deadlineTs),
         updatedAt: fmt.pad(now.getHours()) + ':' + fmt.pad(now.getMinutes()) + ':' + fmt.pad(now.getSeconds()),
-        text: this.buildText(cfg, res, dishTotals, orders)
-      });
+        menuText: this.buildMenuText(cfg, dishTotals),
+        dishIngText: this.buildDishIngredientText(cfg, dishTotals),
+        shopText: this.buildShoppingText(cfg, ingredients)
+      };
+
+      // 食材可能有几十上百条，2 秒轮询时如果内容没变就别重绘（长列表重绘很贵）
+      const sig = ingredients.map((i) => i.name + (i.purchased ? '1' : '0')).join(',');
+      if (sig !== this._ingSig) {
+        patch.ingredients = ingredients;
+        this._ingSig = sig;
+      }
+      if (!this.data.text) patch.text = patch.menuText;
+
+      this.setData(patch);
     } catch (err) {
       // 自动刷新失败时不弹提示，避免每 15 秒骚扰一次；下拉刷新或重进页面会给出提示
       if (!silent) {
@@ -151,51 +177,163 @@ Page({
     }));
   },
 
-  buildText(cfg, res, dishTotals, orders) {
-    const stats = res.stats || {};
+  /** 食材清单 → 渲染数据 */
+  mapIngredients(rawList) {
+    return (rawList || []).map((i) => ({
+      key: 'ing:' + i.name,
+      name: i.name,
+      purchased: !!i.purchased,
+      dishesText: (i.dishes || []).join('、')
+    }));
+  },
+
+  /** 把菜品按分类分组（三种导出都用得上） */
+  groupByCat(dishTotals) {
+    const order = [];
+    const byCat = {};
+    (dishTotals || []).forEach((t) => {
+      const cat = t.category || '其他';
+      if (!byCat[cat]) {
+        byCat[cat] = [];
+        order.push(cat);
+      }
+      byCat[cat].push(t);
+    });
+    return { order: order, byCat: byCat };
+  },
+
+  /**
+   * ① 菜单清单（发给客人）
+   * 只有菜名，**不含谁点的、不含份数** —— 发到群里就是一份干净菜单
+   */
+  buildMenuText(cfg, dishTotals) {
     const lines = [];
-    lines.push('🍽 ' + (cfg.title || '家宴') + ' 点单汇总');
-    lines.push('已下单 ' + stats.orderCount + ' 人 · 到场约 ' + stats.totalPeople + ' 人 · 共 ' + stats.totalDishes + ' 道菜');
-    lines.push('');
-    lines.push('【菜品清单】');
+    lines.push('🍽 ' + ((cfg && cfg.title) || '家宴') + ' · 菜单');
+    if (cfg && cfg.address) lines.push('📍 ' + cfg.address);
     if (!dishTotals.length) {
-      lines.push('（还没有人点单）');
-    } else {
-      dishTotals.forEach((t) => {
-        let s = t.emoji + ' ' + t.name + ' ×' + t.qty;
-        if (t.guestsText) s += ' —— ' + t.guestsText;
-        lines.push(s);
-        (t.notes || []).forEach((n) => lines.push('    ↳ ' + n));
-      });
+      lines.push('');
+      lines.push('（还没有确定菜品）');
+      return lines.join('\n');
     }
+    const g = this.groupByCat(dishTotals);
+    g.order.forEach((cat) => {
+      lines.push('');
+      lines.push('【' + cat + '】');
+      g.byCat[cat].forEach((t) => lines.push('· ' + t.name));
+    });
     lines.push('');
-    lines.push('【按人明细】');
-    if (!orders.length) {
-      lines.push('（还没有人点单）');
-    } else {
-      orders.forEach((o) => {
-        let head = '· ' + o.nick + '（' + o.partySize + ' 人';
-        if (o.arriveAt) head += '，' + o.arriveAt + ' 到';
-        head += '）';
-        if (o.isHost) head += ' ← 主人自己的单';
-        lines.push(head);
-        o.items.forEach((i) => {
-          lines.push('    ' + i.name + ' ×' + i.qty + (i.note ? '（' + i.note + '）' : ''));
-        });
-        if (o.note) lines.push('    备注：' + o.note);
-      });
-    }
+    lines.push('共 ' + dishTotals.length + ' 道菜');
     return lines.join('\n');
   },
 
-  onCopy() {
-    if (!this.data.text) return api.toast('还没有内容可复制');
+  /** ② 菜 + 食材：给家里人/自己备菜用 */
+  buildDishIngredientText(cfg, dishTotals) {
+    const lines = [];
+    lines.push('🍽 ' + ((cfg && cfg.title) || '家宴') + ' · 菜品与食材');
+    if (!dishTotals.length) {
+      lines.push('');
+      lines.push('（还没有确定菜品）');
+      return lines.join('\n');
+    }
+    const g = this.groupByCat(dishTotals);
+    g.order.forEach((cat) => {
+      lines.push('');
+      lines.push('【' + cat + '】');
+      g.byCat[cat].forEach((t) => {
+        lines.push('· ' + t.name + ' ×' + t.qty);
+        const ing = t.ingredients || [];
+        lines.push('   食材：' + (ing.length ? ing.join('、') : '（还没配食材）'));
+      });
+    });
+    return lines.join('\n');
+  },
+
+  /**
+   * ③ 待购食材（只列还没采购的）
+   * 已采购的不列出来，买菜时看的全是缺的
+   */
+  buildShoppingText(cfg, ingredients) {
+    const lines = [];
+    lines.push('🛒 ' + ((cfg && cfg.title) || '家宴') + ' · 待购食材');
+    const missing = (ingredients || []).filter((i) => !i.purchased);
+    const total = (ingredients || []).length;
+
+    if (!total) {
+      lines.push('');
+      lines.push('（还没有食材清单）');
+      return lines.join('\n');
+    }
+    if (!missing.length) {
+      lines.push('');
+      lines.push('全部 ' + total + ' 项都已采购 ✅');
+      return lines.join('\n');
+    }
+    lines.push('还缺 ' + missing.length + ' 项（共 ' + total + ' 项，已采购 ' + (total - missing.length) + ' 项）');
+    lines.push('');
+    missing.forEach((i) => lines.push('· ' + i.name));
+    return lines.join('\n');
+  },
+
+  /** 复制文本：把内容写进剪贴板，同时记下来供「预览」用 */
+  copyText(text, okMsg) {
+    if (!text) return api.toast('还没有内容可复制');
     wx.setClipboardData({
-      data: this.data.text,
-      success() {
-        api.toast('已复制，粘给家人就行', 'success');
+      data: text,
+      success: () => {
+        this.setData({ text: text });
+        api.toast(okMsg, 'success');
       }
     });
+  },
+
+  onCopyMenu() {
+    this.copyText(this.data.menuText, '菜单已复制，发群里就行');
+  },
+
+  onCopyDishIngredient() {
+    this.copyText(this.data.dishIngText, '菜 + 食材已复制');
+  },
+
+  onCopyShopping() {
+    this.copyText(this.data.shopText, '待购食材已复制');
+  },
+
+  /** 点一下食材：已采购 ⇄ 未采购 */
+  async onToggleIngredient(e) {
+    const name = e.currentTarget.dataset.name;
+    const purchased = e.currentTarget.dataset.purchased === 'on';
+    try {
+      await api.call('toggleIngredient', { name: name, purchased: purchased });
+
+      const list = this.data.ingredients.map((i) => (i.name === name ? Object.assign({}, i, { purchased: purchased }) : i));
+      const missing = list.filter((i) => !i.purchased).length;
+      // 本地已是最新，记下签名，免得下一次 2 秒轮询把它当"变化"重绘一遍
+      this._ingSig = list.map((i) => i.name + (i.purchased ? '1' : '0')).join(',');
+
+      this.setData({
+        ingredients: list,
+        ingredientStats: { total: list.length, missing: missing, purchased: list.length - missing },
+        shopText: this.buildShoppingText({ title: this.data.title }, list)
+      });
+    } catch (err) {
+      api.toastErr(err);
+    }
+  },
+
+  async onResetShopping() {
+    const ok = await api.confirm('清空所有"已采购"勾选？\n\n食材清单会保留，只是把勾去掉（下次家宴复用同一份清单时用）。');
+    if (!ok) return;
+    api.loading('处理中');
+    try {
+      await api.call('resetShopping');
+      api.hideLoading();
+      this._ingSig = '';
+      await this.load({ silent: true });
+      api.toast('已清空勾选');
+    } catch (err) {
+      api.hideLoading();
+      api.toastErr(err);
+    }
   },
 
   onRefresh() {

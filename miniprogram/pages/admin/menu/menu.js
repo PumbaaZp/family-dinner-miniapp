@@ -237,6 +237,32 @@ Page({
     this.setData({ dateStr: e.detail.value });
   },
 
+  /**
+   * 只给已有菜补食材（上架状态、限量、自定义描述都不动）
+   *
+   * 为什么需要它：菜库是老数据时，里面的菜没有 ingredients 字段，
+   * 而「导入内置菜库」只补新增、不覆盖已有菜——点它拿不到食材。
+   * 用「重置为默认」又会把上架状态一起还原，所以单独给一个非破坏性的入口。
+   */
+  async onFillIngredients() {
+    const ok = await api.confirm('给菜库里已有的菜补上食材？\n\n只写「食材」这一项，不会动你的上架状态、限量、改过的描述。');
+    if (!ok) return;
+    api.loading('补全中');
+    try {
+      const res = await api.call('seedDishes', { dishes: SEED, ingredientsOnly: true });
+      api.hideLoading();
+      await this.load();
+      wx.showModal({
+        title: '补全完成',
+        content: '补了 ' + res.ingredientsFilled + ' 道菜的食材' + (res.added ? '，另外新增 ' + res.added + ' 道（如「小米南瓜粥」）' : '') + '。\n\n去「后厨看板」就能看到食材采购清单了。',
+        showCancel: false
+      });
+    } catch (err) {
+      api.hideLoading();
+      api.toastErr(err);
+    }
+  },
+
   onTimeChange(e) {
     this.setData({ timeStr: e.detail.value });
   },

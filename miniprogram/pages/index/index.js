@@ -12,8 +12,13 @@ Page({
     deadlineText: '',
     closed: false,
     dishes: [],
-    cats: ['全部'],
+    cats: [{ name: '全部', count: 0 }],
     activeCat: '全部',
+    // 吸顶栏"当前高亮"的分类。和 activeCat（用于过滤列表）分开：
+    // 滚动联动只改高亮，不能改过滤——否则滚到猪肉后随便点个 +，列表会突然只剩猪肉
+    viewCat: '全部',
+    // scroll-view 的 scroll-into-view 目标（让高亮的那一项自己滑进可视区）
+    catScrollInto: '',
     shown: [],
     cartCount: 0,
     myOrder: null,
@@ -84,10 +89,7 @@ Page({
     try {
       const res = await api.call('listDishes');
       const dishes = res.dishes || [];
-      const cats = ['全部'];
-      dishes.forEach((d) => {
-        if (cats.indexOf(d.category) < 0) cats.push(d.category);
-      });
+      const cats = this.buildCats(dishes);
 
       let pruned = 0;
       Object.keys(this.cart).forEach((id) => {
@@ -98,8 +100,8 @@ Page({
         }
       });
 
-      if (cats.indexOf(this.data.activeCat) < 0) this.setData({ activeCat: '全部' });
-      this.setData({ dishes, cats }, () => this.buildShown());
+      if (!cats.some((c) => c.name === this.data.activeCat)) this.setData({ activeCat: '全部' });
+      this.setData({ dishes, cats, viewCat: '全部' }, () => this.buildShown());
       if (pruned) api.toast('有 ' + pruned + ' 道菜已被主人下架，已从你的点单里移除');
     } catch (err) {
       /* 静默失败即可，下拉刷新能重试 */
@@ -108,6 +110,60 @@ Page({
 
   onPullDownRefresh() {
     this.bootstrap(true).then(() => wx.stopPullDownRefresh());
+  },
+
+  /**
+   * 根据滚动位置算出吸顶栏该高亮哪个分类（纯函数，方便测试）
+   *
+   * 规则：默认高亮「全部」；当某个分组标题越过了吸顶栏下沿，就把高亮切到那一类。
+   */
+  spyCat(sections, scrollTop, stickyH) {
+    if (!sections || !sections.length) return '全部';
+    const line = Number(scrollTop || 0) + Number(stickyH || 0) + 8;
+    let name = '全部';
+    for (let i = 0; i < sections.length; i += 1) {
+      if (sections[i].top <= line) name = sections[i].name;
+    }
+    return name;
+  },
+
+  /**
+   * 量出每个分组标题的绝对位置，供滚动联动使用。
+   * 只在列表变化后量一次，滚动时只做数字比较，不反复查询节点。
+   */
+  measureSections() {
+    if (!this._headerNames || !this._headerNames.length) {
+      this._sections = [];
+      return;
+    }
+    const q = wx.createSelectorQuery();
+    q.selectAll('.cat-head').boundingClientRect();
+    q.select('.cats-wrap').boundingClientRect();
+    q.selectViewport().scrollOffset();
+    q.exec((res) => {
+      const heads = (res && res[0]) || [];
+      const bar = (res && res[1]) || null;
+      const vp = (res && res[2]) || { scrollTop: 0 };
+      if (!heads.length) {
+        this._sections = [];
+        return;
+      }
+      this._stickyH = bar ? bar.height : 0;
+      this._sections = heads.map((h, i) => ({
+        name: this._headerNames[i] || '',
+        top: h.top + vp.scrollTop
+      }));
+    });
+  },
+
+  /** 滚到哪一类，吸顶栏就高亮哪一类 */
+  onPageScroll(e) {
+    if (this.data.activeCat !== '全部') return; // 只看"全部"模式（那种模式才分组标题）
+    if (!this._sections || !this._sections.length) return;
+    const name = this.spyCat(this._sections, e.scrollTop, this._stickyH);
+    if (name === this.data.viewCat) return;
+    const idx = this.data.cats.findIndex((c) => c.name === name);
+    this.setData({ viewCat: name, catScrollInto: idx >= 0 ? 'cat-' + idx : '' });
   },
 
   onShareAppMessage() {
@@ -189,12 +245,9 @@ Page({
 
       const [menuRes, mineRes] = await Promise.all([api.call('listDishes'), api.call('myOrder')]);
       const dishes = menuRes.dishes || [];
-      const cats = ['全部'];
-      dishes.forEach((d) => {
-        if (cats.indexOf(d.category) < 0) cats.push(d.category);
-      });
+      const cats = this.buildCats(dishes);
 
-      this.setData({ inited: true, dishes, cats, loading: false });
+      this.setData({ inited: true, dishes, cats, viewCat: '全部', loading: false });
       this._loaded = true;
       this.startDeadlineTick();
 
@@ -247,6 +300,39 @@ Page({
     );
   },
 
+  /**
+   * 分类标签数据。带上"这一类有几道菜"——标签上有数字，才更像导航而不是一排装饰。
+   */
+  buildCats(dishes) {
+    const cats = [{ name: '全部', count: dishes.length }];
+    const index = {};
+    dishes.forEach((d) => {
+      if (!index[d.category]) {
+        index[d.category] = { name: d.category, count: 0 };
+        cats.push(index[d.category]);
+      }
+      index[d.category].count += 1;
+    });
+    return cats;
+  },
+
+  /** 一个菜品 → 一行渲染数据 */
+  dishRow(d) {
+    return {
+      key: 'd:' + d._id,
+      type: 'dish',
+      _id: d._id,
+      name: d.name,
+      emoji: d.emoji || '🍽',
+      desc: d.desc || '',
+      category: d.category,
+      tags: d.tags || [],
+      limit: d.limit,
+      qty: this.cart[d._id] || 0,
+      note: this.notes[d._id] || ''
+    };
+  },
+
   /** 根据分类 + 购物车生成渲染列表 */
   buildShown() {
     const { dishes, activeCat } = this.data;
@@ -266,29 +352,44 @@ Page({
       }
     });
 
-    const shown = dishes
-      .filter((d) => activeCat === '全部' || d.category === activeCat)
-      .map((d) => ({
-        _id: d._id,
-        name: d.name,
-        emoji: d.emoji || '🍽',
-        desc: d.desc || '',
-        category: d.category,
-        tags: d.tags || [],
-        limit: d.limit,
-        qty: this.cart[d._id] || 0,
-        note: this.notes[d._id] || ''
-      }));
+    const shown = [];
+    const headerNames = [];
+
+    if (activeCat === '全部') {
+      // 关键：按分类分组、并在中间插入分组标题。
+      // 否则一路往下划，所有菜连成一片，看不出哪道菜属于哪一类。
+      const order = [];
+      const byCat = {};
+      dishes.forEach((d) => {
+        if (!byCat[d.category]) {
+          byCat[d.category] = [];
+          order.push(d.category);
+        }
+        byCat[d.category].push(d);
+      });
+      order.forEach((cat) => {
+        headerNames.push(cat);
+        shown.push({ key: 'h:' + cat, type: 'header', name: cat, count: byCat[cat].length });
+        byCat[cat].forEach((d) => shown.push(this.dishRow(d)));
+      });
+    } else {
+      dishes.filter((d) => d.category === activeCat).forEach((d) => shown.push(this.dishRow(d)));
+    }
+
+    // 分组标题的名字按顺序记下来：量位置时返回的节点顺序和它一一对应
+    this._headerNames = headerNames;
+
     // 合计必须按整个购物车算：只算当前分类的话，切到别的分类底部会错误显示"已点 0 道"
     const cartCount = Object.keys(this.cart).reduce((s, id) => s + (this.cart[id] || 0), 0);
-    this.setData({ shown, cartCount });
+    this.setData({ shown, cartCount }, () => this.measureSections());
   },
 
   /* -------------------- 交互 -------------------- */
 
   onCat(e) {
     const cat = e.currentTarget.dataset.cat;
-    this.setData({ activeCat: cat }, () => this.buildShown());
+    // 点标签 = 切过滤模式（只看这一类）；高亮同步过去
+    this.setData({ activeCat: cat, viewCat: cat }, () => this.buildShown());
   },
 
   onPlus(e) {

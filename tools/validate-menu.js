@@ -10,7 +10,9 @@
 const fs = require('fs');
 
 const CATEGORY_ORDER = ['猪肉', '鸡肉', '蔬菜', '贝蟹虾', '鱼类', '主食', '汤羹', '甜品', '饮品', '快手菜'];
-const FIELDS = ['name', 'category', 'desc', 'emoji', 'limit', 'tags', 'sort', 'available'];
+const FIELDS = ['name', 'category', 'desc', 'emoji', 'limit', 'tags', 'ingredients', 'sort', 'available'];
+// 厨房必然常备的东西不该进买菜清单（精确匹配；糖不在内——甜品里它是主料）
+const PANTRY = ['盐', '食盐', '食用油', '油', '水', '清水', '白开水', '味精', '鸡精'];
 
 /** 校验菜单数组，返回问题列表（空数组 = 通过） */
 function validateMenu(seed) {
@@ -42,6 +44,21 @@ function validateMenu(seed) {
     if (!Array.isArray(d.tags) || d.tags.length > 5 || d.tags.some((t) => String(t).length > 10)) {
       problems.push(where + ' tags 必须是数组且不超过 5 个、每个不超过 10 字');
     }
+    // 食材：买菜清单的来源，必须每道菜都有
+    if (!Array.isArray(d.ingredients) || !d.ingredients.length) {
+      problems.push(where + ' ingredients 必须是非空数组（买菜清单靠它）');
+    } else {
+      if (d.ingredients.length > 10) problems.push(where + ' 食材超过 10 项，清单会太长');
+      const seenIng = new Set();
+      d.ingredients.forEach((ing) => {
+        const s = String(ing);
+        if (!s.trim()) problems.push(where + ' 有空的食材名');
+        if (s.length > 12) problems.push(where + ' 食材名过长：' + s);
+        if (seenIng.has(s)) problems.push(where + ' 食材重复：' + s);
+        seenIng.add(s);
+        if (PANTRY.includes(s)) problems.push(where + ' 食材是厨房常备的（不该进买菜清单）：' + s);
+      });
+    }
     if (!Number.isInteger(d.sort) || d.sort < 0) problems.push(where + ' sort 必须是非负整数');
     if (typeof d.available !== 'boolean') problems.push(where + ' available 必须是布尔值');
   });
@@ -68,6 +85,7 @@ function toRecords(seed) {
     emoji: d.emoji,
     limit: d.limit,
     tags: d.tags,
+    ingredients: d.ingredients,
     sort: d.sort,
     available: d.available
   }));

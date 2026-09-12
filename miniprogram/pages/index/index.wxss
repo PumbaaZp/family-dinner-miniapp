@@ -144,27 +144,93 @@
   line-height: 1.5;
 }
 
-/* 分类 */
+/* 分类栏：吸顶——往下划也一直都看得到，不用划回去改分类 */
+.cats-wrap {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  margin: 0 -24rpx;
+  padding: 16rpx 24rpx;
+  background: #f7f3ee;
+  box-shadow: 0 6rpx 12rpx -10rpx rgba(120, 90, 70, 0.35);
+}
+
 .cats {
   white-space: nowrap;
-  margin-top: 24rpx;
 }
 
 .cat {
-  display: inline-block;
-  padding: 14rpx 30rpx;
+  display: inline-flex;
+  align-items: center;
+  padding: 16rpx 28rpx;
   margin-right: 16rpx;
   background: #fff;
   border-radius: 999rpx;
-  font-size: 26rpx;
-  color: #6d6058;
-  box-shadow: 0 2rpx 10rpx rgba(120, 90, 70, 0.05);
+  font-size: 28rpx;
+  color: #574a42;
+  box-shadow: 0 2rpx 10rpx rgba(120, 90, 70, 0.08);
+}
+
+.cat-name {
+  font-size: 28rpx;
+}
+
+.cat-on .cat-name {
+  font-weight: 700;
+}
+
+.cat-count {
+  margin-left: 10rpx;
+  font-size: 22rpx;
+  color: #a99d95;
+  background: #f4efe9;
+  border-radius: 999rpx;
+  padding: 2rpx 12rpx;
 }
 
 .cat-on {
   background: #2f2a26;
   color: #fff;
   font-weight: 600;
+}
+
+.cat-on .cat-count {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+/* 分组标题：选「全部」时每类菜前面一条，避免所有菜连成一片 */
+.cat-head {
+  display: flex;
+  align-items: center;
+  margin: 30rpx 0 6rpx;
+  padding-left: 2rpx;
+}
+
+.cat-head-bar {
+  width: 8rpx;
+  height: 30rpx;
+  border-radius: 4rpx;
+  background: linear-gradient(180deg, #e05a35, #c9401f);
+  margin-right: 14rpx;
+}
+
+.cat-head-name {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #2f2a26;
+  letter-spacing: 1rpx;
+}
+
+.cat-head-count {
+  margin-left: 12rpx;
+  font-size: 22rpx;
+  color: #a99d95;
+}
+
+/* 紧跟分组标题的第一张卡片，别再多一层间距 */
+.cat-head + .dish {
+  margin-top: 12rpx;
 }
 
 /* 菜品卡片 */

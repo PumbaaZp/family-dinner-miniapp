@@ -105,6 +105,63 @@
   background: #fff;
 }
 
+/* 食材采购清单 */
+.ing {
+  display: flex;
+  align-items: center;
+  padding: 16rpx 0;
+  border-bottom: 2rpx solid #f7f3ee;
+}
+
+.ing:last-child {
+  border-bottom: none;
+}
+
+.ing-box {
+  flex: none;
+  width: 40rpx;
+  height: 40rpx;
+  border-radius: 10rpx;
+  border: 2rpx solid #d9cfc6;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26rpx;
+  color: #fff;
+}
+
+.ing-box-on {
+  background: #4a8f5f;
+  border-color: #4a8f5f;
+}
+
+.ing-main {
+  flex: 1;
+  min-width: 0;
+  padding-left: 18rpx;
+}
+
+.ing-name {
+  font-size: 29rpx;
+  font-weight: 600;
+}
+
+.ing-done {
+  color: #a99d95;
+  font-weight: 400;
+  text-decoration: line-through;
+}
+
+.ing-dishes {
+  font-size: 21rpx;
+  color: #a99d95;
+  margin-top: 2rpx;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* 说明文字 */
 .hint {
   font-size: 22rpx;

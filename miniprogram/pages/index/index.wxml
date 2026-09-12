@@ -66,55 +66,70 @@
     </block>
   </view>
 
-  <!-- 分类 -->
-  <scroll-view class="cats" scroll-x enable-flex wx:if="{{dishes.length > 1}}">
-    <view
-      class="cat {{activeCat === item ? 'cat-on' : ''}}"
-      wx:for="{{cats}}"
-      wx:key="*this"
-      data-cat="{{item}}"
-      bindtap="onCat"
-    >{{item}}</view>
-  </scroll-view>
-
-  <!-- 菜品列表 -->
-  <view class="dish" wx:for="{{shown}}" wx:key="_id">
-    <view class="dish-emoji">{{item.emoji}}</view>
-    <view class="dish-main">
-      <view class="dish-name">
-        {{item.name}}
-        <text class="dish-limit" wx:if="{{item.limit}}">限 {{item.limit}} 份</text>
-      </view>
-      <view class="dish-desc" wx:if="{{item.desc}}">{{item.desc}}</view>
-      <view class="dish-tags" wx:if="{{item.tags.length}}">
-        <text
-          class="tag {{t === '辣' || t === '微辣' ? 'tag-hot' : ''}}"
-          wx:for="{{item.tags}}"
-          wx:for-item="t"
-          wx:key="*this"
-        >{{t}}</text>
-      </view>
-      <input
-        wx:if="{{item.qty > 0}}"
-        class="dish-note"
-        value="{{item.note}}"
-        placeholder="备注：少辣 / 不要香菜 / 多放醋"
-        placeholder-class="dish-note-ph"
-        data-id="{{item._id}}"
-        bindinput="onNote"
-      />
-    </view>
-    <view class="stepper">
+  <!-- 分类：吸顶，往下划也一直都在；滚到哪一类，这里的高亮就跟着变 -->
+  <view class="cats-wrap" wx:if="{{dishes.length > 1}}">
+    <scroll-view class="cats" scroll-x enable-flex scroll-with-animation scroll-into-view="{{catScrollInto}}">
       <view
-        class="stepper-btn stepper-minus"
-        wx:if="{{item.qty > 0}}"
-        data-id="{{item._id}}"
-        bindtap="onMinus"
-      >−</view>
-      <view class="stepper-num" wx:if="{{item.qty > 0}}">{{item.qty}}</view>
-      <view class="stepper-btn stepper-plus" data-id="{{item._id}}" bindtap="onPlus">+</view>
-    </view>
+        class="cat {{viewCat === item.name ? 'cat-on' : ''}}"
+        id="cat-{{index}}"
+        wx:for="{{cats}}"
+        wx:key="name"
+        data-cat="{{item.name}}"
+        bindtap="onCat"
+      >
+        <text class="cat-name">{{item.name}}</text>
+        <text class="cat-count">{{item.count}}</text>
+      </view>
+    </scroll-view>
   </view>
+
+  <!-- 菜品列表（"全部"时按分类分组，中间有分组标题） -->
+  <block wx:for="{{shown}}" wx:key="key">
+
+    <view class="cat-head" wx:if="{{item.type === 'header'}}">
+      <text class="cat-head-bar"></text>
+      <text class="cat-head-name">{{item.name}}</text>
+      <text class="cat-head-count">{{item.count}} 道</text>
+    </view>
+
+    <view class="dish" wx:else>
+      <view class="dish-emoji">{{item.emoji}}</view>
+      <view class="dish-main">
+        <view class="dish-name">
+          {{item.name}}
+          <text class="dish-limit" wx:if="{{item.limit}}">限 {{item.limit}} 份</text>
+        </view>
+        <view class="dish-desc" wx:if="{{item.desc}}">{{item.desc}}</view>
+        <view class="dish-tags" wx:if="{{item.tags.length}}">
+          <text
+            class="tag {{t === '辣' || t === '微辣' ? 'tag-hot' : ''}}"
+            wx:for="{{item.tags}}"
+            wx:for-item="t"
+            wx:key="*this"
+          >{{t}}</text>
+        </view>
+        <input
+          wx:if="{{item.qty > 0}}"
+          class="dish-note"
+          value="{{item.note}}"
+          placeholder="备注：少辣 / 不要香菜 / 多放醋"
+          placeholder-class="dish-note-ph"
+          data-id="{{item._id}}"
+          bindinput="onNote"
+        />
+      </view>
+      <view class="stepper">
+        <view
+          class="stepper-btn stepper-minus"
+          wx:if="{{item.qty > 0}}"
+          data-id="{{item._id}}"
+          bindtap="onMinus"
+        >−</view>
+        <view class="stepper-num" wx:if="{{item.qty > 0}}">{{item.qty}}</view>
+        <view class="stepper-btn stepper-plus" data-id="{{item._id}}" bindtap="onPlus">+</view>
+      </view>
+    </view>
+  </block>
 
   <!-- 空态 -->
   <view class="empty" wx:if="{{inited && !dishes.length}}">

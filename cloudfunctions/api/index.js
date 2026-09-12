@@ -105,6 +105,8 @@ function defaultConfig(hostCode) {
     notice: '想吃什么点什么，记得写忌口～',
     deadlineTs: 0, // 0 = 不限制截止时间
     maxDishesPerOrder: 0, // 0 = 不限制每人点几道
+    // 食材采购勾选：{ 食材名: true }。只存"已采购"的，没勾的就是还缺的
+    shopping: {},
     hostCode: hostCode || randomCode(),
     admins: []
   };
@@ -217,18 +219,25 @@ async function handleListDishes(openid, event) {
     emoji: d.emoji || '🍽',
     limit: d.limit === null || d.limit === undefined ? null : Number(d.limit),
     tags: d.tags || [],
+    ingredients: d.ingredients || [],
     sort: Number(d.sort) || 0,
     available: !!d.available
   }));
   return ok({ dishes, isAdmin });
 }
 
-/** 批量导入菜库：默认只补新增（不覆盖主人已经改过的菜） */
+/**
+ * 批量导入菜库
+ *  默认            只补新增（不覆盖主人已经改过的菜）
+ *  overwrite: true 同名菜整体覆盖（会把上架状态也还原成种子里的）
+ *  ingredientsOnly 只给已有菜补 ingredients（上架状态、限量、自定义描述都不动）
+ */
 async function handleSeedDishes(openid, event) {
   await requireAdmin(openid);
   const list = Array.isArray(event.dishes) ? event.dishes.slice(0, 200) : [];
   if (!list.length) throw new Error('没有可导入的菜品');
   const overwrite = !!event.overwrite;
+  let ingredientsFilled = 0;
 
   const existing = await db.collection('dishes').limit(MAX_LIMIT).get();
   const byName = {};
@@ -249,12 +258,18 @@ async function handleSeedDishes(openid, event) {
       emoji: str(raw.emoji, 8) || '🍽',
       limit: raw.limit === null || raw.limit === undefined ? null : int(raw.limit, null, 1, 99),
       tags: Array.isArray(raw.tags) ? raw.tags.slice(0, 5).map((t) => str(t, 10)) : [],
+      ingredients: Array.isArray(raw.ingredients) ? raw.ingredients.slice(0, 10).map((t) => str(t, 12)) : [],
       sort: int(raw.sort, 0, 0, 9999),
       available: !!raw.available
     };
     const hit = byName[name];
     if (!hit) toAdd.push(data);
     else if (overwrite) toUpdate.push({ id: hit._id, data });
+    else if (event.ingredientsOnly) {
+      // 只补食材：不动你的上架状态、限量、自定义描述
+      toUpdate.push({ id: hit._id, data: { ingredients: data.ingredients } });
+      ingredientsFilled += 1;
+    }
   }
 
   // 并发写入：36 道菜不要串行 36 次，否则容易撞上云函数默认超时
@@ -267,7 +282,7 @@ async function handleSeedDishes(openid, event) {
   await chunk(toAdd, 10, (data) => db.collection('dishes').add({ data }));
   await chunk(toUpdate, 10, (item) => db.collection('dishes').doc(item.id).update({ data: item.data }));
 
-  return ok({ added: toAdd.length, updated: toUpdate.length, total: list.length });
+  return ok({ added: toAdd.length, updated: toUpdate.length, ingredientsFilled: ingredientsFilled, total: list.length });
 }
 
 async function handleToggleDish(openid, event) {
@@ -312,6 +327,9 @@ async function handleUpdateDish(openid, event) {
   if (patch.tags !== undefined && Array.isArray(patch.tags)) {
     data.tags = patch.tags.slice(0, 5).map((t) => str(t, 10));
   }
+  if (patch.ingredients !== undefined && Array.isArray(patch.ingredients)) {
+    data.ingredients = patch.ingredients.slice(0, 10).map((t) => str(t, 12));
+  }
   if (!Object.keys(data).length) throw new Error('没有可更新的字段');
   await db.collection('dishes').doc(id).update({ data });
   return ok(data);
@@ -329,6 +347,7 @@ async function handleAddDish(openid, event) {
       emoji: str(event.emoji, 8) || '🍽',
       limit: event.limit === null || event.limit === undefined || event.limit === '' ? null : int(event.limit, null, 1, 99),
       tags: Array.isArray(event.tags) ? event.tags.slice(0, 5).map((t) => str(t, 10)) : [],
+      ingredients: Array.isArray(event.ingredients) ? event.ingredients.slice(0, 10).map((t) => str(t, 12)) : [],
       sort: int(event.sort, 999, 0, 9999),
       available: event.available === undefined ? true : !!event.available
     }
@@ -490,6 +509,8 @@ function aggregateOrders(cfg, orderDocs, dishDocs, withOrderId) {
           emoji: i.emoji || dish.emoji || '🍽',
           category: dish.category || '其他',
           limit: dish.limit === null || dish.limit === undefined ? null : Number(dish.limit),
+          // 菜自己的食材：导出"菜 + 食材"清单要用
+          ingredients: dish.ingredients || [],
           qty: 0,
           guests: [],
           notes: []
@@ -517,6 +538,45 @@ function aggregateOrders(cfg, orderDocs, dishDocs, withOrderId) {
   };
 }
 
+/**
+ * 今晚要做的菜涉及的食材清单（含"是否已采购"）
+ *
+ * 取菜范围 = 已上架的菜 ∪ 订单里出现过的菜。
+ * 之所以连"已点但已被下架"的也算进来：那些菜朋友确实点了，主人可能还是会做。
+ */
+function buildIngredients(dishDocs, orderDocs, shopping) {
+  const wanted = {};
+  (dishDocs || []).forEach((d) => {
+    if (d.available) wanted[d._id] = true;
+  });
+  (orderDocs || []).forEach((o) => {
+    (o.items || []).forEach((i) => {
+      wanted[i.dishId] = true;
+    });
+  });
+
+  const list = [];
+  const index = {};
+  (dishDocs || []).forEach((d) => {
+    if (!wanted[d._id]) return;
+    (d.ingredients || []).forEach((raw) => {
+      const name = String(raw || '').trim();
+      if (!name) return;
+      if (!index[name]) {
+        index[name] = { name: name, dishes: [], purchased: !!(shopping && shopping[name]) };
+        list.push(index[name]);
+      }
+      if (index[name].dishes.indexOf(d.name) < 0) index[name].dishes.push(d.name);
+    });
+  });
+
+  // 没买的排前面——采购的时候先看缺的
+  return list.sort((a, b) => {
+    if (a.purchased !== b.purchased) return a.purchased ? 1 : -1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 /** 后厨看板汇总（仅主人） */
 async function handleSummary(openid) {
   await requireAdmin(openid);
@@ -527,7 +587,37 @@ async function handleSummary(openid) {
   ]);
 
   const data = aggregateOrders(cfg, orderRes.data, dishRes.data, true);
-  return ok(Object.assign({ config: publicConfig(cfg, true) }, data));
+  const ingredients = buildIngredients(dishRes.data, orderRes.data, cfg.shopping || {});
+  const missing = ingredients.filter((i) => !i.purchased).length;
+
+  return ok(
+    Object.assign({ config: publicConfig(cfg, true) }, data, {
+      ingredients: ingredients,
+      ingredientStats: { total: ingredients.length, missing: missing, purchased: ingredients.length - missing }
+    })
+  );
+}
+
+/** 主人端勾选 / 取消「已采购」 */
+async function handleToggleIngredient(openid, event) {
+  const cfg = await requireAdmin(openid);
+  const name = str(event.name, 20);
+  if (!name) throw new Error('缺少食材名');
+
+  const shopping = Object.assign({}, cfg.shopping || {});
+  if (event.purchased) shopping[name] = true;
+  else delete shopping[name];
+
+  await saveConfig(Object.assign({}, cfg, { shopping: shopping }));
+  return ok({ name: name, purchased: !!event.purchased, purchasedCount: Object.keys(shopping).length });
+}
+
+/** 清空所有采购勾选（下次家宴复用同一份清单时用） */
+async function handleResetShopping(openid) {
+  const cfg = await requireAdmin(openid);
+  const cleared = Object.keys(cfg.shopping || {}).length;
+  await saveConfig(Object.assign({}, cfg, { shopping: {} }));
+  return ok({ cleared: cleared });
 }
 
 /**
@@ -727,6 +817,10 @@ exports.main = async (event) => {
         return await handleDropDish(openid, event);
       case 'setItemQty':
         return await handleSetItemQty(openid, event);
+      case 'toggleIngredient':
+        return await handleToggleIngredient(openid, event);
+      case 'resetShopping':
+        return await handleResetShopping(openid);
       default:
         return fail('未知操作：' + action);
     }

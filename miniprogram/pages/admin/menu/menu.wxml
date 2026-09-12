@@ -65,10 +65,13 @@
       <text>② 今晚的菜单</text>
       <text class="muted">已上架 {{onCount}} / {{total}}</text>
     </view>
-    <view class="muted">朋友端只会看到「已上架」的菜。菜库有 36 道左右，每次家宴挑 10 来道即可。</view>
+    <view class="muted">朋友端只会看到「已上架」的菜。菜库有 67 道，每次家宴挑 10 来道即可。</view>
 
     <view class="actions" style="margin-top:22rpx">
       <view class="btn btn-ghost" bindtap="onImportSeed">导入内置菜库</view>
+      <view class="btn btn-ghost" bindtap="onFillIngredients">补全食材</view>
+    </view>
+    <view class="actions" style="margin-top:16rpx">
       <view class="btn btn-ghost" bindtap="onResetSeed">重置为默认</view>
     </view>
     <view class="actions" style="margin-top:16rpx">
