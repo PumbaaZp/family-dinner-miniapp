@@ -1,0 +1,16 @@
+# 微信开发者工具的本地私有配置（每台机器一份，会随工具改动，不该进仓库）
+project.private.config.json
+
+# 依赖与构建产物
+node_modules/
+miniprogram_npm/
+
+# 运行时数据 / 日志 / 系统文件
+data.json
+*.log
+.DS_Store
+
+# 根目录的散图（截图之类）；正式素材放 miniprogram/images/ 不受影响
+/*.jpg
+/*.jpeg
+/*.png
