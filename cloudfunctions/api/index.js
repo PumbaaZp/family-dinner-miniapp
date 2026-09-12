@@ -6,6 +6,9 @@
  *
  * 数据库集合：dishes（菜库）、orders（点单）、config（家宴配置）
  * 全部读写都走云函数，因此**不需要在云开发控制台配置任何集合权限**。
+ *
+ * 家里的「库存」（有哪些食材/调料）也存在 config 文档的 pantry 字段里，
+ * 不单独开集合：省得再建一个集合，而且库存天然是"一份"而不是"很多条记录"。
  */
 const cloud = require('wx-server-sdk');
 
@@ -17,6 +20,10 @@ const _ = db.command;
 const COLLECTIONS = ['dishes', 'orders', 'config'];
 const PARTY_ID = 'party';
 const MAX_LIMIT = 500;
+
+/** 库存分类：固定三种，前端筛选/分组都按这个顺序 */
+const PANTRY_CATS = ['食材', '调料', '其他'];
+const MAX_PANTRY = 300;
 
 /* ------------------------------ 工具 ------------------------------ */
 
@@ -107,6 +114,8 @@ function defaultConfig(hostCode) {
     maxDishesPerOrder: 0, // 0 = 不限制每人点几道
     // 食材采购勾选：{ 食材名: true }。只存"已采购"的，没勾的就是还缺的
     shopping: {},
+    // 家里囤货：{ 名称: { cat, qty, note } }。跟菜谱无关，纯"我家有什么"
+    pantry: {},
     hostCode: hostCode || randomCode(),
     admins: []
   };
@@ -539,12 +548,15 @@ function aggregateOrders(cfg, orderDocs, dishDocs, withOrderId) {
 }
 
 /**
- * 今晚要做的菜涉及的食材清单（含"是否已采购"）
+ * 今晚要做的菜涉及的食材清单（含"是否已采购"和"家里有没有"）
  *
  * 取菜范围 = 已上架的菜 ∪ 订单里出现过的菜。
  * 之所以连"已点但已被下架"的也算进来：那些菜朋友确实点了，主人可能还是会做。
+ *
+ * pantry（家里囤货）只用来**标记**，不会把食材从清单里删掉——
+ * 清单是"这次家宴要用到什么"，家里有没有是另一回事，标出来才能一眼看出少什么。
  */
-function buildIngredients(dishDocs, orderDocs, shopping) {
+function buildIngredients(dishDocs, orderDocs, shopping, pantry) {
   const wanted = {};
   (dishDocs || []).forEach((d) => {
     if (d.available) wanted[d._id] = true;
@@ -563,18 +575,142 @@ function buildIngredients(dishDocs, orderDocs, shopping) {
       const name = String(raw || '').trim();
       if (!name) return;
       if (!index[name]) {
-        index[name] = { name: name, dishes: [], purchased: !!(shopping && shopping[name]) };
+        index[name] = {
+          name: name,
+          dishes: [],
+          purchased: !!(shopping && shopping[name]),
+          inStock: !!(pantry && pantry[name])
+        };
         list.push(index[name]);
       }
       if (index[name].dishes.indexOf(d.name) < 0) index[name].dishes.push(d.name);
     });
   });
 
-  // 没买的排前面——采购的时候先看缺的
+  // 排序：要买的排最前（买菜先看缺的）→ 已采购的 → 家里本来就有的排最后
+  const rank = (i) => (i.inStock ? 2 : i.purchased ? 1 : 0);
   return list.sort((a, b) => {
-    if (a.purchased !== b.purchased) return a.purchased ? 1 : -1;
+    const ra = rank(a);
+    const rb = rank(b);
+    if (ra !== rb) return ra - rb;
     return a.name.localeCompare(b.name);
   });
+}
+
+/* ------------------------------ 库存（家里有什么） ------------------------------ */
+
+function pantryCat(v) {
+  const c = str(v, 6);
+  return PANTRY_CATS.indexOf(c) >= 0 ? c : '食材';
+}
+
+/** 单条库存的字段清洗；名称为空视为无效条目（返回 null） */
+function normalizePantryItem(raw) {
+  const name = str(raw && raw.name, 20);
+  if (!name) return null;
+  return {
+    name: name,
+    cat: pantryCat(raw && raw.cat),
+    qty: str(raw && raw.qty, 12),
+    note: str(raw && raw.note, 20)
+  };
+}
+
+/** 库存对象 → 排好序的数组（食材 → 调料 → 其他，同类按名字） */
+function pantryList(cfg) {
+  const map = (cfg && cfg.pantry) || {};
+  const items = Object.keys(map).map((name) => {
+    const it = map[name] || {};
+    return { name: name, cat: pantryCat(it.cat), qty: str(it.qty, 12), note: str(it.note, 20) };
+  });
+  items.sort((a, b) => {
+    const ca = PANTRY_CATS.indexOf(a.cat);
+    const cb = PANTRY_CATS.indexOf(b.cat);
+    if (ca !== cb) return ca - cb;
+    return a.name.localeCompare(b.name);
+  });
+  return items;
+}
+
+function pantryStats(items) {
+  const s = { total: items.length, food: 0, seasoning: 0, other: 0 };
+  items.forEach((i) => {
+    if (i.cat === '调料') s.seasoning += 1;
+    else if (i.cat === '其他') s.other += 1;
+    else s.food += 1;
+  });
+  return s;
+}
+
+/** 家里的库存清单（仅主人：朋友不该看到你家冰箱里有什么） */
+async function handleListPantry(openid) {
+  const cfg = await requireAdmin(openid);
+  const items = pantryList(cfg);
+  return ok({ items: items, stats: pantryStats(items) });
+}
+
+/**
+ * 新增 / 更新库存条目（可批量）
+ *   { items: [{ name, cat, qty, note }, ...] }   批量
+ *   { name, cat, qty, note }                     单条
+ * 同名视为"更新"，不产生重复条目。
+ *
+ * 更新时的字段语义：**没传的字段保持不变，传了空字符串才是清空**。
+ * 这样「快速点选」这类只带名字的调用不会把已有的数量/备注抹掉，
+ * 而库存页的编辑表单（每个字段都会传）依然能正常清空。
+ */
+async function handleSavePantryItems(openid, event) {
+  const cfg = await requireAdmin(openid);
+  const raw = Array.isArray(event.items) ? event.items.slice(0, 200) : [event];
+  const pantry = Object.assign({}, cfg.pantry || {});
+  let added = 0;
+  let updated = 0;
+  const names = [];
+
+  for (const r of raw) {
+    const item = normalizePantryItem(r);
+    if (!item) continue;
+
+    const has = (k) => !!r && typeof r === 'object' && Object.prototype.hasOwnProperty.call(r, k);
+    const old = pantry[item.name];
+    const next = {
+      cat: has('cat') || !old ? item.cat : pantryCat(old.cat),
+      qty: has('qty') || !old ? item.qty : str(old.qty, 12),
+      note: has('note') || !old ? item.note : str(old.note, 20)
+    };
+
+    if (old) updated += 1;
+    else added += 1;
+    pantry[item.name] = next;
+    names.push(item.name);
+  }
+
+  if (!names.length) throw new Error('没有可保存的条目（名称不能为空）');
+  const total = Object.keys(pantry).length;
+  if (total > MAX_PANTRY) throw new Error('库存最多存 ' + MAX_PANTRY + ' 项，先清理一些吧');
+
+  await saveConfig(Object.assign({}, cfg, { pantry: pantry }));
+  return ok({ saved: names.length, added: added, updated: updated, total: total, names: names });
+}
+
+/** 删掉一条库存 */
+async function handleRemovePantryItem(openid, event) {
+  const cfg = await requireAdmin(openid);
+  const name = str(event.name, 20);
+  if (!name) throw new Error('缺少名称');
+  const pantry = Object.assign({}, cfg.pantry || {});
+  const existed = !!pantry[name];
+  delete pantry[name];
+  await saveConfig(Object.assign({}, cfg, { pantry: pantry }));
+  return ok({ name: name, removed: existed, total: Object.keys(pantry).length });
+}
+
+/** 清空库存（换季大扫除用；不影响菜库和订单） */
+async function handleClearPantry(openid) {
+  const cfg = await requireAdmin(openid);
+  const cleared = Object.keys(cfg.pantry || {}).length;
+  await saveConfig(Object.assign({}, cfg, { pantry: {} }));
+  return ok({ cleared: cleared });
 }
 
 /** 后厨看板汇总（仅主人） */
@@ -587,13 +723,25 @@ async function handleSummary(openid) {
   ]);
 
   const data = aggregateOrders(cfg, orderRes.data, dishRes.data, true);
-  const ingredients = buildIngredients(dishRes.data, orderRes.data, cfg.shopping || {});
-  const missing = ingredients.filter((i) => !i.purchased).length;
+  const ingredients = buildIngredients(dishRes.data, orderRes.data, cfg.shopping || {}, cfg.pantry || {});
+  const pantry = pantryList(cfg);
+
+  // 三个数加起来正好是 total：家里有的 / 已经买了的 / 还要买的
+  const inStock = ingredients.filter((i) => i.inStock).length;
+  const purchased = ingredients.filter((i) => i.purchased && !i.inStock).length;
+  const missing = ingredients.length - inStock - purchased;
 
   return ok(
     Object.assign({ config: publicConfig(cfg, true) }, data, {
       ingredients: ingredients,
-      ingredientStats: { total: ingredients.length, missing: missing, purchased: ingredients.length - missing }
+      pantry: pantry,
+      ingredientStats: {
+        total: ingredients.length,
+        missing: missing,
+        purchased: purchased,
+        inStock: inStock,
+        pantryCount: pantry.length
+      }
     })
   );
 }
@@ -821,6 +969,14 @@ exports.main = async (event) => {
         return await handleToggleIngredient(openid, event);
       case 'resetShopping':
         return await handleResetShopping(openid);
+      case 'listPantry':
+        return await handleListPantry(openid);
+      case 'savePantryItems':
+        return await handleSavePantryItems(openid, event);
+      case 'removePantryItem':
+        return await handleRemovePantryItem(openid, event);
+      case 'clearPantry':
+        return await handleClearPantry(openid);
       default:
         return fail('未知操作：' + action);
     }

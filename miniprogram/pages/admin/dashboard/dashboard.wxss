@@ -170,6 +170,48 @@
   margin: -6rpx 0 14rpx;
 }
 
+/* 还要买 / 已买 / 家里有 三个数，一眼看清清单构成 */
+.ing-split {
+  display: flex;
+  gap: 12rpx;
+  margin-bottom: 12rpx;
+}
+
+.ing-split text {
+  flex: 1;
+  text-align: center;
+  font-size: 22rpx;
+  color: #7b6e66;
+  background: #faf7f3;
+  border-radius: 10rpx;
+  padding: 10rpx 0;
+}
+
+/* 「家里已有」分组的标题 */
+.ing-head {
+  font-size: 22rpx;
+  color: #2e7d5b;
+  background: #eaf6f0;
+  border-radius: 10rpx;
+  padding: 10rpx 18rpx;
+  margin: 14rpx 0 4rpx;
+}
+
+/* 家里本来就有的：整行淡一点，再加个标签，避免跟"要买的"混在一起 */
+.ing-stock {
+  opacity: 0.75;
+}
+
+.ing-stock-tag {
+  flex: none;
+  font-size: 20rpx;
+  color: #2e7d5b;
+  background: #eaf6f0;
+  border-radius: 8rpx;
+  padding: 4rpx 12rpx;
+  margin-left: 10rpx;
+}
+
 /* 按人明细 */
 .op {
   padding: 22rpx 0;

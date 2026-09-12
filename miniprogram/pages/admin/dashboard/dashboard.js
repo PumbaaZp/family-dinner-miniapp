@@ -23,9 +23,9 @@ Page({
 
     // 家宴标题（导出清单时用作标题）
     title: '',
-    // 食材清单（含"是否已采购"）+ 统计
+    // 食材清单（含"是否已采购 / 家里有没有"）+ 统计
     ingredients: [],
-    ingredientStats: { total: 0, missing: 0, purchased: 0 },
+    ingredientStats: { total: 0, missing: 0, purchased: 0, inStock: 0, pantryCount: 0 },
     // 三种导出的文本，load 时生成好，点按钮直接复制
     menuText: '',
     dishIngText: '',
@@ -120,7 +120,7 @@ Page({
         dishTotals,
         orders,
         hasHostOrder: orders.some((o) => o.isHost),
-        ingredientStats: res.ingredientStats || { total: 0, missing: 0, purchased: 0 },
+        ingredientStats: res.ingredientStats || { total: 0, missing: 0, purchased: 0, inStock: 0, pantryCount: 0 },
         deadlineText: deadlineTs ? fmt.fmtShort(deadlineTs) + '（' + fmt.countdown(deadlineTs) + '）' : '不限时间',
         closed: !!(deadlineTs && Date.now() > deadlineTs),
         updatedAt: fmt.pad(now.getHours()) + ':' + fmt.pad(now.getMinutes()) + ':' + fmt.pad(now.getSeconds()),
@@ -130,7 +130,9 @@ Page({
       };
 
       // 食材可能有几十上百条，2 秒轮询时如果内容没变就别重绘（长列表重绘很贵）
-      const sig = ingredients.map((i) => i.name + (i.purchased ? '1' : '0')).join(',');
+      const sig = ingredients
+        .map((i) => i.name + (i.purchased ? '1' : '0') + (i.inStock ? 'S' : ''))
+        .join(',');
       if (sig !== this._ingSig) {
         patch.ingredients = ingredients;
         this._ingSig = sig;
@@ -179,12 +181,22 @@ Page({
 
   /** 食材清单 → 渲染数据 */
   mapIngredients(rawList) {
-    return (rawList || []).map((i) => ({
-      key: 'ing:' + i.name,
-      name: i.name,
-      purchased: !!i.purchased,
-      dishesText: (i.dishes || []).join('、')
-    }));
+    let stockHeaderDone = false;
+    return (rawList || []).map((i) => {
+      const inStock = !!i.inStock;
+      // 云函数把"家里已有的"排在最后，这里在第一条前面插一条小标题，
+      // 让主人一眼看出"下面这些不用买"
+      const showStockHeader = inStock && !stockHeaderDone;
+      if (showStockHeader) stockHeaderDone = true;
+      return {
+        key: 'ing:' + i.name,
+        name: i.name,
+        purchased: !!i.purchased,
+        inStock: inStock,
+        showStockHeader: showStockHeader,
+        dishesText: (i.dishes || []).join('、')
+      };
+    });
   },
 
   /** 把菜品按分类分组（三种导出都用得上） */
@@ -249,29 +261,52 @@ Page({
   },
 
   /**
-   * ③ 待购食材（只列还没采购的）
-   * 已采购的不列出来，买菜时看的全是缺的
+   * ③ 待购食材（只列"还要买"的）
+   * 家里已有的、以及已经买好的都不列出来 —— 买菜时看的全是缺的
    */
   buildShoppingText(cfg, ingredients) {
     const lines = [];
     lines.push('🛒 ' + ((cfg && cfg.title) || '家宴') + ' · 待购食材');
-    const missing = (ingredients || []).filter((i) => !i.purchased);
-    const total = (ingredients || []).length;
+    const all = ingredients || [];
+    const inStock = all.filter((i) => i.inStock);
+    const missing = all.filter((i) => !i.purchased && !i.inStock);
+    const bought = all.length - inStock.length - missing.length;
 
-    if (!total) {
+    if (!all.length) {
       lines.push('');
       lines.push('（还没有食材清单）');
       return lines.join('\n');
     }
     if (!missing.length) {
       lines.push('');
-      lines.push('全部 ' + total + ' 项都已采购 ✅');
+      lines.push('要用的 ' + all.length + ' 项全都齐了 ✅');
+      if (inStock.length) lines.push('（其中 ' + inStock.length + ' 项家里本来就有）');
       return lines.join('\n');
     }
-    lines.push('还缺 ' + missing.length + ' 项（共 ' + total + ' 项，已采购 ' + (total - missing.length) + ' 项）');
+
+    let head = '还要买 ' + missing.length + ' 项';
+    if (inStock.length || bought) {
+      const extra = [];
+      if (inStock.length) extra.push('家里已有 ' + inStock.length + ' 项');
+      if (bought) extra.push('已买 ' + bought + ' 项');
+      head += '（本次要用 ' + all.length + ' 项 · ' + extra.join(' · ') + '）';
+    }
+    lines.push(head);
     lines.push('');
     missing.forEach((i) => lines.push('· ' + i.name));
+    if (inStock.length) {
+      lines.push('');
+      lines.push('（家里已有的 ' + inStock.length + ' 项没列出来）');
+    }
     return lines.join('\n');
+  },
+
+  /** 按"家里有 / 已买 / 还要买"重新算一遍三个数（本地改完不用等云函数） */
+  countStats(list) {
+    const all = list || [];
+    const inStock = all.filter((i) => i.inStock).length;
+    const purchased = all.filter((i) => i.purchased && !i.inStock).length;
+    return { total: all.length, inStock: inStock, purchased: purchased, missing: all.length - inStock - purchased };
   },
 
   /** 复制文本：把内容写进剪贴板，同时记下来供「预览」用 */
@@ -306,18 +341,22 @@ Page({
       await api.call('toggleIngredient', { name: name, purchased: purchased });
 
       const list = this.data.ingredients.map((i) => (i.name === name ? Object.assign({}, i, { purchased: purchased }) : i));
-      const missing = list.filter((i) => !i.purchased).length;
       // 本地已是最新，记下签名，免得下一次 2 秒轮询把它当"变化"重绘一遍
-      this._ingSig = list.map((i) => i.name + (i.purchased ? '1' : '0')).join(',');
+      this._ingSig = list.map((i) => i.name + (i.purchased ? '1' : '0') + (i.inStock ? 'S' : '')).join(',');
 
       this.setData({
         ingredients: list,
-        ingredientStats: { total: list.length, missing: missing, purchased: list.length - missing },
+        ingredientStats: Object.assign({}, this.data.ingredientStats, this.countStats(list)),
         shopText: this.buildShoppingText({ title: this.data.title }, list)
       });
     } catch (err) {
       api.toastErr(err);
     }
+  },
+
+  /** 去「家里的库存」补录一些食材，回来待购清单就短了 */
+  goPantry() {
+    wx.navigateTo({ url: '/pages/admin/pantry/pantry' });
   },
 
   async onResetShopping() {

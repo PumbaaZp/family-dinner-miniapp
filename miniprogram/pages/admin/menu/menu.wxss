@@ -90,6 +90,22 @@
   white-space: nowrap;
 }
 
+/* 每道菜下面那行"家里食材够不够"，点一下看缺哪几样 */
+.drow-ing {
+  display: inline-block;
+  font-size: 20rpx;
+  color: #b06a3c;
+  background: #fdf2e7;
+  border-radius: 8rpx;
+  padding: 4rpx 12rpx;
+  margin-top: 8rpx;
+}
+
+.drow-ing-ok {
+  color: #2e7d5b;
+  background: #eaf6f0;
+}
+
 .drow-limit {
   display: flex;
   align-items: center;

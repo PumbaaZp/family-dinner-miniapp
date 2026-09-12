@@ -115,6 +115,10 @@ Page({
     wx.navigateTo({ url: '/pages/admin/dashboard/dashboard' });
   },
 
+  goPantry() {
+    wx.navigateTo({ url: '/pages/admin/pantry/pantry' });
+  },
+
   onCopyCode() {
     const code = this.data.cfg && this.data.cfg.hostCode;
     if (!code) return api.toast('没有口令信息');

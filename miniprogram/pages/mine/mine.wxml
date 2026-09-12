@@ -86,6 +86,14 @@
         </view>
         <text class="entry-arrow">›</text>
       </view>
+      <view class="entry" bindtap="goPantry">
+        <text class="entry-emoji">🧺</text>
+        <view class="entry-main">
+          <view class="entry-name">家里的库存</view>
+          <view class="entry-desc">记下有哪些食材和调料，挑菜时就知道缺什么</view>
+        </view>
+        <text class="entry-arrow">›</text>
+      </view>
       <view class="entry" bindtap="onCopyCode">
         <text class="entry-emoji">🔑</text>
         <view class="entry-main">

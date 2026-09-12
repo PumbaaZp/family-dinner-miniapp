@@ -67,7 +67,18 @@
     </view>
     <view class="muted">朋友端只会看到「已上架」的菜。菜库有 67 道，每次家宴挑 10 来道即可。</view>
 
-    <view class="actions" style="margin-top:22rpx">
+    <view class="muted" style="margin-top:14rpx" wx:if="{{pantryCount}}">
+      库存里记了 {{pantryCount}} 项食材，其中 {{canCookCount}} 道菜的食材家里已经齐了（看每道菜下面的小字）。
+    </view>
+    <view class="muted" style="margin-top:14rpx" wx:else>
+      还没记库存：去「家里的库存」点几下（菜谱里的食材可以直接点选），这里就会标出每道菜「食材都有 / 缺几样」。
+    </view>
+
+    <view class="actions" style="margin-top:16rpx">
+      <view class="btn btn-ghost" bindtap="goPantry">🧺 管理库存</view>
+    </view>
+
+    <view class="actions" style="margin-top:16rpx">
       <view class="btn btn-ghost" bindtap="onImportSeed">导入内置菜库</view>
       <view class="btn btn-ghost" bindtap="onFillIngredients">补全食材</view>
     </view>
@@ -93,6 +104,12 @@
       <view class="drow-main">
         <view class="drow-name">{{d.name}}</view>
         <view class="drow-desc">{{d.desc}}</view>
+        <view
+          class="drow-ing {{d.haveFull ? 'drow-ing-ok' : ''}}"
+          wx:if="{{d.haveShort}}"
+          data-id="{{d._id}}"
+          catchtap="onShowCoverage"
+        >{{d.haveFull ? '✅ ' : '🧺 '}}{{d.haveShort}}</view>
       </view>
       <view class="drow-limit">
         <input

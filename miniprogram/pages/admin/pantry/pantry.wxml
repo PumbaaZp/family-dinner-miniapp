@@ -1,0 +1,147 @@
+<view class="page page-with-footer">
+
+  <!-- 概览 -->
+  <view class="hero">
+    <view class="hero-title">家里的库存</view>
+    <view class="hero-sub">记下"我家现在有什么"，跟菜谱无关。菜单页会照着它标「食材都有 / 缺几样」。</view>
+    <view class="hero-meta">
+      <view class="hero-chip">共 {{stats.total}} 项</view>
+      <view class="hero-chip">食材 {{stats.food}}</view>
+      <view class="hero-chip">调料 {{stats.seasoning}}</view>
+      <view class="hero-chip" wx:if="{{stats.other}}">其他 {{stats.other}}</view>
+    </view>
+  </view>
+
+  <!-- 添加 / 编辑 -->
+  <view class="card">
+    <view class="card-title">
+      <text>{{editing ? '修改「' + editing + '」' : '添加一样'}}</text>
+      <text class="link" wx:if="{{editing}}" bindtap="onCancelEdit">取消</text>
+    </view>
+
+    <view class="field">
+      <view class="field-label">名称</view>
+      <input
+        class="input {{editing ? 'input-locked' : ''}}"
+        value="{{form.name}}"
+        disabled="{{!!editing}}"
+        data-key="name"
+        bindinput="onFormInput"
+        placeholder="例如：生抽、五花肉、鸡蛋"
+      />
+      <view class="muted" wx:if="{{editing}}" style="margin-top:8rpx">名字就是它的身份，改名请删掉重新加一条。</view>
+    </view>
+
+    <view class="row-2">
+      <view class="field picker-cell">
+        <view class="field-label">分类</view>
+        <picker mode="selector" range="{{cats}}" value="{{catIndex}}" bindchange="onCatChange">
+          <view class="picker">{{cats[catIndex]}}</view>
+        </picker>
+      </view>
+      <view class="field picker-cell">
+        <view class="field-label">数量（可留空）</view>
+        <input class="input" value="{{form.qty}}" data-key="qty" bindinput="onFormInput" placeholder="2 瓶 / 半袋" />
+      </view>
+    </view>
+
+    <view class="field">
+      <view class="field-label">备注（可留空）</view>
+      <input class="input" value="{{form.note}}" data-key="note" bindinput="onFormInput" placeholder="放在灶台下柜子里" />
+    </view>
+
+    <view class="btn btn-primary" bindtap="onAdd">{{editing ? '保存修改' : '加进库存'}}</view>
+  </view>
+
+  <!-- 从菜谱食材快速添加 -->
+  <view class="card">
+    <view class="card-title" bindtap="onToggleQuick">
+      <text>从菜谱食材快速点选</text>
+      <text class="link">{{showQuick ? '收起' : '展开'}}</text>
+    </view>
+    <view class="muted">
+      菜谱里一共出现过 {{ingredientCount}} 种食材，点一下就是"家里有"。还有 {{quickMissing}} 种没点。
+    </view>
+
+    <block wx:if="{{showQuick}}">
+      <input class="input chip-filter" value="{{chipFilter}}" bindinput="onChipFilter" placeholder="搜一下，比如「酱」" />
+
+      <view class="chips">
+        <view
+          class="chip {{item.have ? 'chip-on' : ''}}"
+          wx:for="{{quickChips}}"
+          wx:key="name"
+          data-name="{{item.name}}"
+          data-have="{{item.have}}"
+          bindtap="onToggleChip"
+        >{{item.have ? '✓ ' : '+ '}}{{item.name}}</view>
+      </view>
+
+      <view class="empty" wx:if="{{!quickChips.length}}">
+        <view>没找到匹配的食材</view>
+      </view>
+    </block>
+  </view>
+
+  <!-- 批量粘贴 -->
+  <view class="card">
+    <view class="card-title" bindtap="onToggleBulk">
+      <text>批量粘贴</text>
+      <text class="link">{{showBulk ? '收起' : '展开'}}</text>
+    </view>
+    <view class="muted">一行一样，可以带数量：生抽 2瓶 / 五花肉 1斤 / 小葱</view>
+
+    <block wx:if="{{showBulk}}">
+      <textarea
+        class="bulk-input"
+        value="{{bulkText}}"
+        bindinput="onBulkInput"
+        placeholder="生抽 2瓶&#10;老抽 1瓶&#10;五花肉 1斤"
+        maxlength="2000"
+      />
+      <view class="btn btn-ghost" style="margin-top:18rpx" bindtap="onBulkAdd">识别并加入</view>
+    </block>
+  </view>
+
+  <!-- 库存清单 -->
+  <view class="card" wx:for="{{groups}}" wx:key="cat">
+    <view class="card-title">
+      <text>{{item.cat}}（{{item.count}}）</text>
+    </view>
+
+    <view
+      class="prow"
+      wx:for="{{item.items}}"
+      wx:for-item="it"
+      wx:key="name"
+      data-name="{{it.name}}"
+      bindtap="onPickItem"
+    >
+      <view class="prow-main">
+        <view class="prow-name">{{it.name}}</view>
+        <view class="prow-note" wx:if="{{it.note}}">{{it.note}}</view>
+      </view>
+      <text class="prow-qty" wx:if="{{it.qty}}">{{it.qty}}</text>
+      <view class="prow-del" catchtap="onRemove" data-name="{{it.name}}">✕</view>
+    </view>
+  </view>
+
+  <view class="card" wx:if="{{!loading && !stats.total}}">
+    <view class="empty">
+      <text class="empty-emoji">🧺</text>
+      <view>库存还是空的</view>
+      <view class="muted" style="margin-top:12rpx">上面「从菜谱食材快速点选」点几下就能建起来，不用一个个打字。</view>
+    </view>
+  </view>
+
+  <view class="card" wx:if="{{stats.total}}">
+    <view class="card-title">维护</view>
+    <view class="muted">换了住处、大扫除之后可以整体清空重来。</view>
+    <view class="actions" style="margin-top:20rpx">
+      <view class="btn" bindtap="onRefresh">刷新</view>
+      <view class="btn btn-danger" bindtap="onClearAll">清空库存</view>
+    </view>
+  </view>
+
+  <view class="loading" wx:if="{{loading}}">加载中…</view>
+</view>

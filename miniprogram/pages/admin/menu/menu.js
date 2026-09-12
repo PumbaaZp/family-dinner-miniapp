@@ -1,5 +1,6 @@
 const api = require('../../../utils/api.js');
 const fmt = require('../../../utils/format.js');
+const P = require('../../../utils/pantry.js');
 const SEED = require('../../../data/dishes.seed.js');
 
 const app = getApp();
@@ -20,7 +21,10 @@ Page({
     currentDeadlineTs: 0,
     enableDeadline: false,
     hostCode: '',
-    seedCount: SEED.length
+    seedCount: SEED.length,
+    // 库存概览：菜谱里的菜有几道"家里食材够做"
+    pantryCount: 0,
+    canCookCount: 0
   },
 
   onLoad() {
@@ -45,10 +49,24 @@ Page({
       const res = await api.call('listDishes', { all: true });
       this.all = res.dishes || [];
 
+      // 库存读不到不致命（最常见的场景是云函数还没重新部署，没有 listPantry 这个 action），
+      // 菜单页必须照常能用，所以单独兜住。
+      let pantryCount = 0;
+      let pantryFailed = false;
+      try {
+        const pantry = await api.call('listPantry');
+        this.pantryNameMap = P.toNameMap(pantry.items || []);
+        pantryCount = (pantry.stats && pantry.stats.total) || (pantry.items || []).length;
+      } catch (e) {
+        this.pantryNameMap = {};
+        pantryFailed = true;
+      }
+
       const deadlineTs = Number(cfg.deadlineTs) || 0;
       this.setData({
         loading: false,
         isAdmin: true,
+        pantryCount: pantryCount,
         form: {
           title: cfg.title || '',
           host: cfg.host || '',
@@ -65,30 +83,77 @@ Page({
         enableDeadline: deadlineTs > 0
       });
       this.buildGroups();
+      if (pantryFailed) api.toast('没读到库存：云函数可能还没重新部署');
     } catch (err) {
       this.setData({ loading: false });
       api.toastErr(err);
     }
   },
 
+  /**
+   * 分组渲染。顺手算一下每道菜"家里的食材够不够"——
+   * 挑菜的时候最想知道的就是这个：缺两样的先别上架。
+   */
   buildGroups() {
     const dishes = this.all || [];
+    const haveMap = this.pantryNameMap || {};
+    // 库存是空的（或者没读到）就一律不显示"缺几样"：
+    // 否则每道菜都挂一句"缺 3 样"，纯噪音，还会让人以为库存数据丢了。
+    const hasPantry = Object.keys(haveMap).length > 0;
     const order = [];
     const map = {};
+    let canCook = 0;
+
     dishes.forEach((d) => {
+      const cov = P.coverage(d, haveMap);
+      if (cov.full) canCook += 1;
+      const row = Object.assign({}, d, {
+        haveShort: hasPantry ? P.coverageShort(cov) : '',
+        haveFull: cov.full,
+        missingCount: cov.missing.length,
+        ingTotal: cov.total
+      });
       if (!map[d.category]) {
         map[d.category] = [];
         order.push(d.category);
       }
-      map[d.category].push(d);
+      map[d.category].push(row);
     });
+
     const groups = order.map((c) => ({
       category: c,
       dishes: map[c],
       onCount: map[c].filter((d) => d.available).length
     }));
     const onCount = dishes.filter((d) => d.available).length;
-    this.setData({ groups, total: dishes.length, onCount, offCount: dishes.length - onCount });
+    this.setData({
+      groups,
+      total: dishes.length,
+      onCount,
+      offCount: dishes.length - onCount,
+      canCookCount: canCook
+    });
+  },
+
+  goPantry() {
+    wx.navigateTo({ url: '/pages/admin/pantry/pantry' });
+  },
+
+  /** 点菜名旁边的"缺 N 样"，看具体缺哪几样 */
+  onShowCoverage(e) {
+    const id = e.currentTarget.dataset.id;
+    const dish = (this.all || []).filter((d) => d._id === id)[0];
+    if (!dish) return;
+    const cov = P.coverage(dish, this.pantryNameMap || {});
+    wx.showModal({
+      title: dish.name,
+      content: P.coverageDetail(dish.name, cov),
+      confirmText: '去补库存',
+      cancelText: '知道了',
+      success: (res) => {
+        if (res.confirm) this.goPantry();
+      }
+    });
   },
 
   /* ---------- 菜库 ---------- */

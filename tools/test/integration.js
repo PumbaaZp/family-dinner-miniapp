@@ -188,6 +188,90 @@ async function runBackend() {
   r = await call('summary', {}, HOST);
   expect('清空后没有已采购项', r.data.ingredientStats.purchased === 0, JSON.stringify(r.data.ingredientStats));
 
+  /* --- 家里的库存（跟菜谱解耦：记的是"我家有什么"） --- */
+  const ingTotal = r.data.ingredientStats.total;
+
+  r = await call('listPantry', {}, GUEST_C);
+  expect('朋友看不到家里的库存', r.ok === false && /权限/.test(r.msg), r.msg);
+  r = await call('savePantryItems', { name: '生抽' }, GUEST_C);
+  expect('朋友不能改库存', r.ok === false && /权限/.test(r.msg), r.msg);
+  r = await call('whoami', {}, GUEST_B);
+  expect('库存不会跟着配置发给朋友', r.ok && r.data.config && r.data.config.pantry === undefined, JSON.stringify(r.data.config));
+
+  r = await call('listPantry', {}, HOST);
+  expect('初始库存为空', r.ok && r.data.items.length === 0 && r.data.stats.total === 0, JSON.stringify(r.data.stats));
+
+  r = await call('savePantryItems', { name: ing0, cat: '调料', qty: '2 瓶', note: '灶台下柜子' }, HOST);
+  expect('第一次保存是「新增」', r.ok && r.data.added === 1 && r.data.updated === 0 && r.data.total === 1, JSON.stringify(r.data));
+  r = await call('savePantryItems', { name: ing0, cat: '调料', qty: '3 瓶' }, HOST);
+  expect('同名再保存是「更新」，不会变成两条', r.ok && r.data.updated === 1 && r.data.total === 1, JSON.stringify(r.data));
+  r = await call('listPantry', {}, HOST);
+  const afterPartial = r.data.items.filter((i) => i.name === ing0)[0];
+  expect('更新时没传的字段保持不变（只改数量不该把备注抹掉）',
+    afterPartial.qty === '3 瓶' && afterPartial.note === '灶台下柜子',
+    JSON.stringify(afterPartial));
+  r = await call('savePantryItems', { name: ing0, note: '' }, HOST);
+  expect('显式传空字符串才是清空', r.ok && r.data.updated === 1);
+  r = await call('listPantry', {}, HOST);
+  const cleared = r.data.items.filter((i) => i.name === ing0)[0];
+  expect('备注被清空、数量还在（只传了 note）',
+    cleared.note === '' && cleared.qty === '3 瓶' && cleared.cat === '调料',
+    JSON.stringify(cleared));
+  await call('savePantryItems', { name: ing0, cat: '调料', qty: '3 瓶', note: '灶台下柜子' }, HOST);
+
+  r = await call('savePantryItems', { items: [{ name: '咖啡豆', qty: '1 袋' }, { name: '   ' }, { name: '燕麦', cat: '不存在的分类' }] }, HOST);
+  expect('批量保存会跳过空名称', r.ok && r.data.saved === 2 && r.data.added === 2, JSON.stringify(r.data));
+
+  await call('savePantryItems', { name: '咖啡豆' }, HOST);
+  r = await call('listPantry', {}, HOST);
+  const coffee = r.data.items.filter((i) => i.name === '咖啡豆')[0];
+  expect('「快速点选」只带名字，不会把已有条目的数量清掉', coffee.qty === '1 袋' && coffee.cat === '食材', JSON.stringify(coffee));
+
+  r = await call('savePantryItems', { items: [{ name: '  ' }] }, HOST);
+  expect('整批都是空名称时报错而不是静默成功', r.ok === false && /名称/.test(r.msg), r.msg);
+
+  r = await call('listPantry', {}, HOST);
+  const pantry = r.data.items;
+  expect('库存按 食材 → 调料 → 其他 排序', pantry.map((i) => i.cat).join(',') === '食材,食材,调料', JSON.stringify(pantry.map((i) => i.name + '/' + i.cat)));
+  expect('没填分类的默认「食材」', pantry.filter((i) => i.name === '咖啡豆')[0].cat === '食材');
+  expect('不认识的分类回落到「食材」', pantry.filter((i) => i.name === '燕麦')[0].cat === '食材');
+  expect('数量和备注原样存下来', pantry.filter((i) => i.name === ing0)[0].qty === '3 瓶' && pantry.filter((i) => i.name === ing0)[0].note === '灶台下柜子',
+    JSON.stringify(pantry.filter((i) => i.name === ing0)));
+  expect('库存统计按分类给数', r.data.stats.total === 3 && r.data.stats.food === 2 && r.data.stats.seasoning === 1, JSON.stringify(r.data.stats));
+
+  r = await call('summary', {}, HOST);
+  const stocked = r.data.ingredients.filter((i) => i.inStock);
+  expect('汇总里每项食材都带「家里有没有」', r.data.ingredients.every((i) => typeof i.inStock === 'boolean'), JSON.stringify(r.data.ingredients[0]));
+  expect('家里有的食材被标出来（' + ing0 + '）', stocked.length === 1 && stocked[0].name === ing0, JSON.stringify(stocked.map((i) => i.name)));
+  expect('库存不会把食材从清单里删掉', r.data.ingredientStats.total === ingTotal, JSON.stringify(r.data.ingredientStats));
+  expect('家里有的不算「还要买」',
+    r.data.ingredientStats.missing === ingTotal - 1 && r.data.ingredientStats.inStock === 1,
+    JSON.stringify(r.data.ingredientStats));
+  expect('三个数加起来正好是总数',
+    r.data.ingredientStats.inStock + r.data.ingredientStats.purchased + r.data.ingredientStats.missing === r.data.ingredientStats.total,
+    JSON.stringify(r.data.ingredientStats));
+  expect('家里有的排到清单最后（要买的先看）',
+    r.data.ingredients[r.data.ingredients.length - 1].name === ing0,
+    r.data.ingredients.map((i) => i.name + (i.inStock ? '(家里有)' : '')).slice(-3).join(','));
+  expect('汇总把库存整份带回来（主人端要显示项数）',
+    Array.isArray(r.data.pantry) && r.data.pantry.length === 3 && r.data.ingredientStats.pantryCount === 3,
+    JSON.stringify(r.data.pantry));
+
+  r = await call('removePantryItem', { name: '咖啡豆' }, HOST);
+  expect('删掉一条库存', r.ok && r.data.removed === true && r.data.total === 2, JSON.stringify(r.data));
+  r = await call('removePantryItem', { name: '不存在的' }, HOST);
+  expect('删不存在的条目不报错', r.ok && r.data.removed === false && r.data.total === 2, JSON.stringify(r.data));
+  r = await call('removePantryItem', {}, HOST);
+  expect('缺名称会被拒绝', r.ok === false && /名称/.test(r.msg), r.msg);
+
+  r = await call('clearPantry', {}, GUEST_C);
+  expect('朋友不能清空库存', r.ok === false, r.msg);
+  r = await call('clearPantry', {}, HOST);
+  expect('清空库存返回清了多少条', r.ok && r.data.cleared === 2, JSON.stringify(r.data));
+  r = await call('summary', {}, HOST);
+  expect('清空后食材清单回到"全都要买"', r.data.ingredientStats.inStock === 0 && r.data.ingredientStats.missing === ingTotal,
+    JSON.stringify(r.data.ingredientStats));
+
   /* 限量：自己设一个，不依赖种子数据里恰好有没有限量菜 */
   const allDishes = (await call('listDishes', { all: true }, HOST)).data.dishes;
   const water = allDishes.find((d) => d.limit === null);
@@ -539,11 +623,14 @@ function makeWxMock() {
 async function loadPages() {
   console.log('\n[B] 前端页面加载与纯逻辑');
   global.wx = makeWxMock();
-  global.getApp = () => ({
+  // 所有页面在 require 时就 getApp() 拿到同一个对象，所以这里做成单例：
+  // 测试里可以临时改它的 ensureSession 来扮演"主人已登录"
+  const appObj = {
     globalData: { openid: '', isAdmin: false, cfg: null },
     ensureSession: () => Promise.resolve({ inited: true, isAdmin: false, config: null }),
     refreshSession: () => Promise.resolve({})
-  });
+  };
+  global.getApp = () => appObj;
 
   let captured = null;
   global.App = (o) => {
@@ -558,6 +645,7 @@ async function loadPages() {
     index: 'miniprogram/pages/index/index.js',
     mine: 'miniprogram/pages/mine/mine.js',
     menu: 'miniprogram/pages/admin/menu/menu.js',
+    pantry: 'miniprogram/pages/admin/pantry/pantry.js',
     dashboard: 'miniprogram/pages/admin/dashboard/dashboard.js'
   };
 
@@ -578,7 +666,8 @@ async function loadPages() {
   const expectMethods = {
     index: ['bootstrap', 'buildShown', 'buildCats', 'dishRow', 'spyCat', 'measureSections', 'onPageScroll', 'onPlus', 'onMinus', 'onNote', 'onSubmit', 'onClearCart', 'reloadMenu', 'onInitAsHost', 'goMenu', 'goDashboard', 'onHide', 'onUnload', 'startDeadlineTick', 'stopDeadlineTick', 'onToggleBoard', 'loadBoard', 'mapBoard'],
     mine: ['refresh', 'applyOrder', 'onCancel', 'onCopy', 'onBecomeAdmin'],
-    menu: ['load', 'buildGroups', 'onToggleDish', 'onToggleCategory', 'batchAll', 'onLimitEdit', 'onImportSeed', 'onFillIngredients', 'onSaveSettings', 'onClearDeadline', 'onToggleDeadline'],
+    menu: ['load', 'buildGroups', 'onToggleDish', 'onToggleCategory', 'batchAll', 'onLimitEdit', 'onImportSeed', 'onFillIngredients', 'onSaveSettings', 'onClearDeadline', 'onToggleDeadline', 'goPantry', 'onShowCoverage'],
+    pantry: ['load', 'render', 'putItem', 'onFormInput', 'onCatChange', 'onPickItem', 'onCancelEdit', 'onAdd', 'onRemove', 'onClearAll', 'onToggleQuick', 'onChipFilter', 'onToggleChip', 'onToggleBulk', 'onBulkInput', 'onBulkAdd', 'onRefresh'],
     dashboard: ['load', 'mapOrders', 'mapIngredients', 'groupByCat', 'buildMenuText', 'buildDishIngredientText', 'buildShoppingText', 'copyText', 'onCopyMenu', 'onCopyDishIngredient', 'onCopyShopping', 'onToggleIngredient', 'onResetShopping', 'previewText', 'onRefresh', 'onShow', 'onHide', 'onUnload', 'startAutoRefresh', 'scheduleRefresh', 'stopAutoRefresh', 'onDropDish', 'onDropOrderItem', 'dropDish', 'onDecItem', 'onEditItemQty', 'setItemQty']
   };
   Object.keys(expectMethods).forEach((key) => {
@@ -873,16 +962,51 @@ async function loadPages() {
 
     const shopText = loaded.dashboard.buildShoppingText({ title: '周末家宴' }, ingList);
     expect('待购清单：只列还没买的', shopText.indexOf('· 五花肉') >= 0 && shopText.indexOf('· 冰糖') < 0, shopText);
-    expect('待购清单：给出还缺几项', shopText.indexOf('还缺 1 项') >= 0 && shopText.indexOf('已采购 1 项') >= 0, shopText);
+    expect('待购清单：给出还要买几项', shopText.indexOf('还要买 1 项') >= 0 && shopText.indexOf('已买 1 项') >= 0, shopText);
     expect('待购清单：全买完时给明确提示',
-      loaded.dashboard.buildShoppingText({}, [{ name: '冰糖', purchased: true }]).indexOf('全部 1 项都已采购') >= 0);
+      loaded.dashboard.buildShoppingText({}, [{ name: '冰糖', purchased: true }]).indexOf('要用的 1 项全都齐了') >= 0);
     expect('待购清单：没有食材时不崩',
       loaded.dashboard.buildShoppingText({}, []).indexOf('（还没有食材清单）') >= 0);
 
+    /* 家里已有的不算"还要买" */
+    const stockIng = loaded.dashboard.mapIngredients([
+      { name: '五花肉', purchased: false, dishes: ['红烧肉'] },
+      { name: '冰糖', purchased: false, dishes: ['红烧肉', '话梅排骨'] },
+      { name: '生抽', purchased: false, dishes: ['红烧肉'], inStock: true }
+    ]);
+    expect('食材清单：家里有会被标出来（含分组小标题）',
+      stockIng[2].inStock === true && stockIng[2].showStockHeader === true && stockIng[0].showStockHeader === false,
+      JSON.stringify(stockIng.map((i) => i.name + ':' + i.inStock + ':' + i.showStockHeader)));
+    expect('食材清单：只有一个分组小标题', stockIng.filter((i) => i.showStockHeader).length === 1);
+    expect('食材清单：旧版云函数不返回 inStock 时不崩', loaded.dashboard.mapIngredients([{ name: '盐' }])[0].inStock === false);
+
+    const stockText = loaded.dashboard.buildShoppingText({ title: '周末家宴' }, stockIng);
+    expect('待购清单：家里有的不列出来', stockText.indexOf('· 生抽') < 0 && stockText.indexOf('· 五花肉') >= 0, stockText);
+    expect('待购清单：说明家里已有几项',
+      stockText.indexOf('还要买 2 项') >= 0 && stockText.indexOf('家里已有 1 项') >= 0 && stockText.indexOf('（家里已有的 1 项没列出来）') >= 0,
+      stockText);
+
+    const cstats = loaded.dashboard.countStats(stockIng);
+    expect('三个数按「家里有 / 已买 / 还要买」拆开算',
+      cstats.total === 3 && cstats.inStock === 1 && cstats.purchased === 0 && cstats.missing === 2,
+      JSON.stringify(cstats));
+    const cstats2 = loaded.dashboard.countStats([
+      { name: 'a', purchased: true, inStock: false },
+      { name: 'b', purchased: true, inStock: true },
+      { name: 'c', purchased: false, inStock: false }
+    ]);
+    expect('已买又家里有的，只算「家里有」（不能重复计数）',
+      cstats2.inStock === 1 && cstats2.purchased === 1 && cstats2.missing === 1 && cstats2.total === 3,
+      JSON.stringify(cstats2));
+
     /* 用户明确要求：复制内容不关心"谁点的" */
     expect('三种导出都不含谁点的（回归点）',
-      [menuText, diText, shopText].every((t) => t.indexOf('老王') < 0 && t.indexOf('小李') < 0 && t.indexOf('按人明细') < 0 && t.indexOf('主人自己的单') < 0),
-      'menu/di/shop 三种文本里都不该出现点单人');
+      [menuText, diText, shopText, stockText].every((t) => t.indexOf('老王') < 0 && t.indexOf('小李') < 0 && t.indexOf('按人明细') < 0 && t.indexOf('主人自己的单') < 0),
+      'menu/di/shop/stock 四种文本里都不该出现点单人');
+
+    /* 库存里记了什么也不该混进菜单文本（那是主人自己的家事） */
+    expect('待购清单不泄露库存的备注/分类',
+      stockText.indexOf('调料') < 0 && stockText.indexOf('灶台下') < 0, stockText);
 
     /* 按人明细的渲染 key：昵称可能重复，key 必须唯一（不能用昵称当 key） */
     const mapped = loaded.dashboard.mapOrders([
@@ -961,6 +1085,179 @@ async function loadPages() {
       global.setTimeout = realSetTimeout;
       global.clearTimeout = realClearTimeout;
     }
+  }
+
+  /* ---- 家里的库存：纯逻辑 ---- */
+  const pantryUtil = require(path.join(ROOT, 'miniprogram', 'utils', 'pantry.js'));
+
+  expect('库存分类只有三种且顺序固定', pantryUtil.CATS.join(',') === '食材,调料,其他', pantryUtil.CATS.join(','));
+
+  expect('调料能自动认出来',
+    ['生抽', '蒸鱼豉油', '薄盐生抽', '冰糖'].every((n) => pantryUtil.guessCat(n) === '调料'),
+    ['生抽', '蒸鱼豉油', '薄盐生抽', '冰糖'].map(pantryUtil.guessCat).join(','));
+  expect('食材不会被误判成调料',
+    ['五花肉', '小葱', '生姜', '梭子蟹', '小米'].every((n) => pantryUtil.guessCat(n) === '食材'),
+    ['五花肉', '小葱', '生姜', '梭子蟹', '小米'].map(pantryUtil.guessCat).join(','));
+  expect('单字调料只做全等匹配（别把"油麦菜"吞进来）',
+    pantryUtil.guessCat('油') === '调料' && pantryUtil.guessCat('盐') === '调料' &&
+      pantryUtil.guessCat('油麦菜') === '食材' && pantryUtil.guessCat('盐焗鸡') === '食材',
+    ['油', '盐', '油麦菜', '盐焗鸡'].map(pantryUtil.guessCat).join(','));
+  expect('空名字不崩', pantryUtil.guessCat('') === '食材' && pantryUtil.guessCat(null) === '食材');
+
+  const bulk = pantryUtil.parseBulk('生抽 2瓶\n- 五花肉，1斤\n\n1. 小葱\n# 这是注释\n生抽 3瓶\n  生姜  ');
+  expect('批量粘贴：一行一样，能带数量',
+    bulk.length === 4 && bulk[0].name === '生抽' && bulk[0].qty === '2瓶' && bulk[1].name === '五花肉' && bulk[1].qty === '1斤',
+    JSON.stringify(bulk));
+  expect('批量粘贴：忽略空行、注释、序号和项目符号', bulk.map((i) => i.name).join(',') === '生抽,五花肉,小葱,生姜', bulk.map((i) => i.name).join(','));
+  expect('批量粘贴：同名只留第一条', bulk.filter((i) => i.name === '生抽').length === 1 && bulk[0].qty === '2瓶');
+  expect('批量粘贴：顺手把分类猜好', bulk[0].cat === '调料' && bulk[1].cat === '食材', JSON.stringify(bulk.map((i) => i.name + ':' + i.cat)));
+  expect('批量粘贴：空文本不报错', pantryUtil.parseBulk('').length === 0 && pantryUtil.parseBulk(null).length === 0);
+
+  const sortedItems = pantryUtil.sortItems([
+    { name: '生抽', cat: '调料' },
+    { name: '五花肉', cat: '食材' },
+    { name: '咖啡豆', cat: '' },
+    { name: '猫粮', cat: '其他' }
+  ]);
+  expect('库存排序：食材 → 调料 → 其他',
+    sortedItems.map((i) => pantryUtil.normalizeCat(i.cat)).join(',') === '食材,食材,调料,其他',
+    sortedItems.map((i) => i.name + ':' + i.cat).join(', '));
+
+  const groups2 = pantryUtil.groupItems([{ name: '生抽', cat: '调料' }, { name: '五花肉', cat: '食材' }, { name: '猫粮', cat: '其他' }]);
+  expect('库存分组：空分类不出现、count 跟条目数一致',
+    groups2.map((g) => g.cat).join(',') === '食材,调料,其他' && groups2.every((g) => g.count === g.items.length),
+    JSON.stringify(groups2.map((g) => g.cat + ':' + g.count)));
+  expect('库存分组：空库存返回空数组', pantryUtil.groupItems([]).length === 0 && pantryUtil.groupItems(null).length === 0);
+
+  const hotDish = { name: '红烧肉', ingredients: ['五花肉', '冰糖', '生抽'] };
+  const haveMap = pantryUtil.toNameMap([{ name: '冰糖' }, { name: '生抽' }, { name: '猫粮' }]);
+  const cov = pantryUtil.coverage(hotDish, haveMap);
+  expect('够不够做：数得出家里有几样', cov.total === 3 && cov.haveCount === 2 && cov.full === false, JSON.stringify(cov));
+  expect('够不够做：列得出缺的那几样', cov.missing.join(',') === '五花肉', cov.missing.join(','));
+  expect('够不够做：短提示写"缺 N 样"', pantryUtil.coverageShort(cov) === '缺 1 样', pantryUtil.coverageShort(cov));
+  expect('够不够做：点开能看到缺的名字', pantryUtil.coverageDetail('红烧肉', cov).indexOf('五花肉') >= 0, pantryUtil.coverageDetail('红烧肉', cov));
+
+  const covFull = pantryUtil.coverage(hotDish, pantryUtil.toNameMap([{ name: '五花肉' }, { name: '冰糖' }, { name: '生抽' }]));
+  expect('食材全有 → 标成"食材都有"', covFull.full === true && pantryUtil.coverageShort(covFull) === '食材都有', pantryUtil.coverageShort(covFull));
+
+  const covEmpty = pantryUtil.coverage({ name: '神秘菜' }, haveMap);
+  expect('没配食材的菜不算"齐了"（不然会误报）', covEmpty.total === 0 && covEmpty.full === false && pantryUtil.coverageShort(covEmpty) === '');
+  expect('没配食材时给出补全引导', pantryUtil.coverageDetail('神秘菜', covEmpty).indexOf('补全食材') >= 0, pantryUtil.coverageDetail('神秘菜', covEmpty));
+
+  const covAlias = pantryUtil.coverage({ name: 'x', ingredients: ['小葱'] }, pantryUtil.toNameMap([{ name: '葱' }]));
+  expect('只做同名匹配，不猜同义词（小葱 ≠ 葱）', covAlias.haveCount === 0 && covAlias.missing.join(',') === '小葱', JSON.stringify(covAlias));
+
+  /* ---- 菜单页：照着库存标"够不够做" ---- */
+  if (loaded.menu) {
+    const mctx = {
+      all: [
+        { _id: 'm1', name: '红烧肉', category: '猪肉', available: true, ingredients: ['五花肉', '冰糖', '生抽'] },
+        { _id: 'm2', name: '小米南瓜粥', category: '主食', available: false, ingredients: ['小米', '南瓜'] }
+      ],
+      pantryNameMap: pantryUtil.toNameMap([{ name: '冰糖' }, { name: '生抽' }]),
+      data: {},
+      setData(d) {
+        Object.assign(this.data, d);
+      }
+    };
+    loaded.menu.buildGroups.call(mctx);
+    const rows = mctx.data.groups.reduce((a, g) => a.concat(g.dishes), []);
+    expect('菜单页：每道菜标出「缺几样」',
+      rows[0].haveShort === '缺 1 样' && rows[0].missingCount === 1 && rows[0].haveFull === false,
+      JSON.stringify(rows.map((r) => r.name + ':' + r.haveShort)));
+    expect('菜单页：分组统计没被破坏',
+      mctx.data.groups.length === 2 && mctx.data.onCount === 1 && mctx.data.total === 2 && mctx.data.canCookCount === 0,
+      JSON.stringify({ groups: mctx.data.groups.length, on: mctx.data.onCount, total: mctx.data.total, canCook: mctx.data.canCookCount }));
+
+    mctx.pantryNameMap = pantryUtil.toNameMap([{ name: '小米' }, { name: '南瓜' }]);
+    loaded.menu.buildGroups.call(mctx);
+    expect('菜单页：食材齐了的菜会被数出来（挑菜时最有用）',
+      mctx.data.canCookCount === 1 && mctx.data.groups[1].dishes[0].haveFull === true && mctx.data.groups[1].dishes[0].haveShort === '食材都有',
+      JSON.stringify({ canCook: mctx.data.canCookCount, text: mctx.data.groups[1].dishes[0].haveShort }));
+
+    const mctx2 = {
+      all: [{ _id: 'm3', name: '自定义菜', category: '自定义', available: false, ingredients: ['五花肉'] }],
+      pantryNameMap: {},
+      data: {},
+      setData(d) {
+        Object.assign(this.data, d);
+      }
+    };
+    loaded.menu.buildGroups.call(mctx2);
+    expect('菜单页：库存是空的时候一律不显示"缺几样"（否则满屏噪音，还像丢了数据）',
+      mctx2.data.groups[0].dishes[0].haveShort === '' && mctx2.data.canCookCount === 0,
+      JSON.stringify(mctx2.data.groups[0].dishes[0]));
+
+    /* 用户最容易撞到的场景：代码更新了但云函数还没重新部署（旧版没有 listPantry）。
+       这时菜单页必须照常能用，只是不显示"缺几样"。 */
+    const menuApi = require(path.join(ROOT, 'miniprogram', 'utils', 'api.js'));
+    const realCall = menuApi.call;
+    const realToast = menuApi.toast;
+    const realEnsure = appObj.ensureSession;
+    let toastMsg = '';
+    menuApi.call = (action) => {
+      if (action === 'listDishes') {
+        return Promise.resolve({
+          dishes: [{ _id: 'x1', name: '红烧肉', category: '猪肉', available: true, ingredients: ['五花肉', '冰糖'] }]
+        });
+      }
+      if (action === 'listPantry') return Promise.reject(new Error('未知操作：listPantry'));
+      return Promise.resolve({});
+    };
+    menuApi.toast = (m) => {
+      toastMsg = m;
+    };
+    appObj.ensureSession = () => Promise.resolve({ isAdmin: true, config: { title: '家宴' } });
+    try {
+      const lctx = {
+        data: {},
+        setData(d) {
+          Object.assign(this.data, d);
+        },
+        buildGroups: loaded.menu.buildGroups
+      };
+      await loaded.menu.load.call(lctx);
+      expect('云函数还是旧版（没有 listPantry）时，菜单页照常加载',
+        lctx.data.loading === false && lctx.data.isAdmin === true && lctx.data.pantryCount === 0 && lctx.data.groups.length === 1,
+        JSON.stringify({ loading: lctx.data.loading, admin: lctx.data.isAdmin, groups: lctx.data.groups.length }));
+      expect('并且提示"可能还没重新部署"', /重新部署/.test(toastMsg), toastMsg);
+      expect('读不到库存时菜品行不显示"缺几样"',
+        lctx.data.groups[0].dishes[0].haveShort === '' && lctx.data.canCookCount === 0,
+        JSON.stringify(lctx.data.groups[0].dishes[0]));
+    } catch (e) {
+      bad('云函数是旧版时菜单页不该崩', e.message);
+    } finally {
+      menuApi.call = realCall;
+      menuApi.toast = realToast;
+      appObj.ensureSession = realEnsure;
+    }
+  }
+
+  /* ---- 库存页：本地状态整理 ---- */
+  if (loaded.pantry) {
+    const pctx = {
+      items: [{ name: '生抽', cat: '调料', qty: '2瓶', note: '' }],
+      all: [{ _id: 'd1', name: '红烧肉', ingredients: ['五花肉', '生抽'] }],
+      data: { chipFilter: '' },
+      setData(d) {
+        Object.assign(this.data, d);
+      }
+    };
+    loaded.pantry.render.call(pctx);
+    expect('库存页：分组与统计正确',
+      pctx.data.groups.length === 1 && pctx.data.stats.total === 1 && pctx.data.stats.seasoning === 1,
+      JSON.stringify(pctx.data.stats));
+    expect('库存页：菜谱食材里"还没有的"排前面（正等着你点）',
+      pctx.data.quickChips.map((c) => c.name).join(',') === '五花肉,生抽',
+      pctx.data.quickChips.map((c) => c.name + ':' + c.have).join(','));
+    expect('库存页：算出还有几种没点', pctx.data.quickMissing === 1 && pctx.data.ingredientCount === 2,
+      JSON.stringify({ missing: pctx.data.quickMissing, total: pctx.data.ingredientCount }));
+
+    loaded.pantry.putItem.call(pctx, { name: '五花肉', cat: '食材' });
+    expect('库存页：本地新增后按分类重排（跟服务端顺序一致）', pctx.items.map((i) => i.name).join(',') === '五花肉,生抽', pctx.items.map((i) => i.name).join(','));
+
+    loaded.pantry.putItem.call(pctx, { name: '生抽', cat: '调料', qty: '3瓶' });
+    expect('库存页：同名不会变成两条', pctx.items.length === 2 && pctx.items.filter((i) => i.name === '生抽')[0].qty === '3瓶', JSON.stringify(pctx.items));
   }
 
   /* 报错翻译：部署期最容易撞到的几类失败，必须给人能照做的提示 */

@@ -3,6 +3,7 @@
     "pages/index/index",
     "pages/mine/mine",
     "pages/admin/menu/menu",
+    "pages/admin/pantry/pantry",
     "pages/admin/dashboard/dashboard"
   ],
   "window": {
