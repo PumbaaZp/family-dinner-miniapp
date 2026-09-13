@@ -196,7 +196,8 @@
     </view>
 
     <view class="actions" style="margin-top:22rpx">
-      <view class="btn" bindtap="onResetVotes">清空本场点赞</view>
+      <!-- 名字跟着"正在看哪一场"变：免得在看历史场次时以为清的是当前这一场 -->
+      <view class="btn" bindtap="onResetVotes">{{isCurrentView ? '清空本场点赞' : '清空这一场的点赞'}}</view>
     </view>
   </view>
 

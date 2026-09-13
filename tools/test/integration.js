@@ -1140,7 +1140,7 @@ async function loadPages() {
 
   /* 页面方法齐全性 */
   const expectMethods = {
-    index: ['bootstrap', 'buildShown', 'buildCats', 'dishRow', 'spyCat', 'measureSections', 'onPageScroll', 'onPlus', 'onMinus', 'onNote', 'onSubmit', 'onClearCart', 'reloadMenu', 'onInitAsHost', 'goMenu', 'goDashboard', 'onHide', 'onUnload', 'startDeadlineTick', 'stopDeadlineTick', 'onToggleBoard', 'loadBoard', 'mapBoard', 'onToggleLike', 'loadVotes', 'buildVoteList', 'onTapVote', 'saveVotes', 'bumpLike', 'refreshVoteCounts', 'onClearVotes', 'loadDinners', 'onPickSession', 'onRetry'],
+    index: ['bootstrap', 'buildShown', 'buildCats', 'dishRow', 'spyCat', 'measureSections', 'onPageScroll', 'onPlus', 'onMinus', 'onNote', 'onSubmit', 'onClearCart', 'reloadMenu', 'onInitAsHost', 'goMenu', 'goDashboard', 'onHide', 'onUnload', 'startDeadlineTick', 'stopDeadlineTick', 'onToggleBoard', 'loadBoard', 'mapBoard', 'onToggleLike', 'loadVotes', 'buildVoteList', 'onTapVote', 'saveVotes', 'bumpLike', 'refreshVoteCounts', 'onClearVotes', 'loadDinners', 'mapDinners', 'onPickSession', 'onRetry'],
     mine: ['refresh', 'applyOrder', 'onCancel', 'onCopy', 'onBecomeAdmin'],
     menu: ['load', 'buildGroups', 'onToggleDish', 'onToggleCategory', 'batchAll', 'onLimitEdit', 'onImportSeed', 'onFillIngredients', 'onSaveSettings', 'onClearDeadline', 'onToggleDeadline', 'goPantry', 'onShowCoverage', 'onEditDish', 'onEditInput', 'onEditCatChange', 'onCancelEdit', 'onSaveDish'],
     pantry: ['load', 'render', 'putItem', 'onFormInput', 'onCatChange', 'onPickItem', 'onCancelEdit', 'onAdd', 'onRemove', 'onClearAll', 'onToggleQuick', 'onChipFilter', 'onToggleChip', 'onToggleBulk', 'onBulkInput', 'onBulkAdd', 'onRefresh'],
@@ -1898,6 +1898,72 @@ async function loadPages() {
       likes.map((l) => l.barPercent).join(','));
     expect('看板点赞榜：每项有唯一 key', new Set(likes.map((l) => l.key)).size === 3);
     expect('看板点赞榜：空数据不崩', loaded.dashboard.mapLikes([]).length === 0 && loaded.dashboard.mapLikes(undefined).length === 0);
+
+    /* 「清空这一场的点赞」：确认框要把「哪一场、几个人、多少票」说清楚，
+       而且只能清正在看的那一场（主人误点一下不该把历史场次的票也删了）。 */
+    const dashApi = require(path.join(ROOT, 'miniprogram', 'utils', 'api.js'));
+    const realConfirm = dashApi.confirm;
+    const realDashCall = dashApi.call;
+    try {
+      let asked = '';
+      const calls = [];
+      dashApi.confirm = (msg) => {
+        asked = msg;
+        return Promise.resolve(asked.indexOf('__取消__') >= 0 ? false : true);
+      };
+      dashApi.call = (action, data) => {
+        calls.push({ action: action, data: data });
+        return Promise.resolve({ cleared: 3 });
+      };
+      const mkResetCtx = (isCurrent) => ({
+        data: {
+          likes: [{ count: 2 }, { count: 1 }],
+          likeStats: { voters: 3 },
+          session: { id: isCurrent ? 'sOct' : 'party', name: isCurrent ? '十月中家宴' : '0913场家宴' },
+          isCurrentView: isCurrent
+        },
+        loadedTimes: 0,
+        setData(d) {
+          Object.assign(this.data, d);
+        },
+        async load() {
+          this.loadedTimes++;
+        }
+      });
+
+      const resetCtx = mkResetCtx(true);
+      await loaded.dashboard.onResetVotes.call(resetCtx);
+      expect('清空点赞的确认框写清了「哪一场 / 几个人 / 多少票」',
+        asked.indexOf('十月中家宴') >= 0 && asked.indexOf('3 个人投的 3 票') >= 0,
+        JSON.stringify(asked));
+      expect('确认后只清正在看的那一场（带的是那一场的 id）',
+        calls.length === 1 && calls[0].action === 'resetVotes' && calls[0].data.sessionId === 'sOct',
+        JSON.stringify(calls));
+      expect('清完会刷新看板，并说明清的是哪一场',
+        resetCtx.loadedTimes === 1, '刷新次数=' + resetCtx.loadedTimes);
+
+      // 点"取消"：一个请求都不该发
+      asked = '';
+      calls.length = 0;
+      dashApi.confirm = () => Promise.resolve(false);
+      const cancelCtx = mkResetCtx(true);
+      await loaded.dashboard.onResetVotes.call(cancelCtx);
+      expect('点「取消」不会真的清（不发请求、不刷新）', calls.length === 0 && cancelCtx.loadedTimes === 0);
+
+      // 在看历史场次时，确认框要提醒"这里清的不是当前这一场"
+      asked = '';
+      dashApi.confirm = (msg) => {
+        asked = msg;
+        return Promise.resolve(false);
+      };
+      await loaded.dashboard.onResetVotes.call(mkResetCtx(false));
+      expect('看历史场次时，确认框会提醒"清的不是当前这一场"',
+        asked.indexOf('0913场家宴') >= 0 && asked.indexOf('不是当前这一场') >= 0, JSON.stringify(asked));
+    } finally {
+      dashApi.confirm = realConfirm;
+      dashApi.call = realDashCall;
+    }
+
   }
 
   /* 真机网络不稳时：云函数调用既不 success 也不 fail 也不能永远转圈 */

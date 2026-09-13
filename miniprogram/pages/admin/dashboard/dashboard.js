@@ -432,18 +432,30 @@ Page({
     }
   },
 
-  /** 清空点赞：默认只清本场（历史场次的票留着当参考） */
+  /**
+   * 清空点赞：**只清正在看的这一场**
+   *
+   * 确认框里把「几个人、多少票、哪一场」都写清楚：
+   * 人是投票的人数（一场一人一张票），票是这些票里一共赞了几道菜 —— 两个数不一样，
+   * 只写"3 个人"容易被理解成"3 个赞"，点下去才发现删掉的是 5 票。
+   */
   async onResetVotes() {
     const n = this.data.likeStats.voters || 0;
+    const votes = (this.data.likes || []).reduce((s, l) => s + (Number(l.count) || 0), 0);
     const name = (this.data.session && this.data.session.name) || '本场';
-    const ok = await api.confirm('清空「' + name + '」的点赞？\n\n' + n + ' 个人的本场投票会被删掉；历史场次的票和累计榜不受影响。');
+    const isCur = this.data.isCurrentView !== false;
+    const ok = await api.confirm(
+      '清空「' + name + '」的点赞？\n\n' +
+        '这一场 ' + n + ' 个人投的 ' + votes + ' 票会被删掉。\n' +
+        '历史场次的票和累计榜不受影响' + (isCur ? '' : '（注意：这里清的不是当前这一场）') + '。'
+    );
     if (!ok) return;
     api.loading('处理中');
     try {
       const res = await api.call('resetVotes', { sessionId: this.data.session ? this.data.session.id : '' });
       api.hideLoading();
       await this.load({ silent: true });
-      api.toast('已清空 ' + res.cleared + ' 人的本场点赞');
+      api.toast('已清空「' + name + '」' + res.cleared + ' 个人的点赞');
     } catch (err) {
       api.hideLoading();
       api.toastErr(err);
