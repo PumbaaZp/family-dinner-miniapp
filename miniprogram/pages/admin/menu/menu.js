@@ -27,7 +27,12 @@ Page({
     canCookCount: 0,
     // 客人的点赞（挑下次菜单的参考）
     topLikes: [],
-    likedDishCount: 0
+    likedDishCount: 0,
+    // 编辑菜品（临时加的菜、分类放错的菜，都用它改）
+    editing: null,
+    editForm: { name: '', desc: '', emoji: '', ingredients: '', tags: '' },
+    editCatIndex: 0,
+    catOptions: []
   },
 
   onLoad() {
@@ -305,6 +310,96 @@ Page({
       api.hideLoading();
       await this.load();
       api.toast('已重置 ' + res.updated + ' 道');
+    } catch (err) {
+      api.hideLoading();
+      api.toastErr(err);
+    }
+  },
+
+  /* ---------- 编辑菜品 ---------- */
+
+  /**
+   * 打开编辑面板
+   *
+   * 为什么需要：临时加的菜（「+ 新增」）只填了一个名字、分类固定是「自定义」，
+   * 之后想补简介、换分类、写食材，界面上一直没有入口。这里补上。
+   */
+  onEditDish(e) {
+    const id = e.currentTarget.dataset.id;
+    const dish = (this.all || []).filter((d) => d._id === id)[0];
+    if (!dish) return;
+
+    // 分类下拉 = 菜库里已有的分类（+ 排在最前的「自定义」和「其他」）
+    const used = [];
+    (this.all || []).forEach((d) => {
+      if (d.category && used.indexOf(d.category) < 0) used.push(d.category);
+    });
+    const catOptions = ['自定义'].concat(used.filter((c) => c !== '自定义'));
+    if (used.indexOf('其他') < 0) catOptions.push('其他');
+
+    this.setData({
+      editing: { _id: dish._id, name: dish.name, available: !!dish.available, limit: dish.limit },
+      editForm: {
+        name: dish.name || '',
+        desc: dish.desc || '',
+        emoji: dish.emoji || '',
+        ingredients: (dish.ingredients || []).join('、'),
+        tags: (dish.tags || []).join('、')
+      },
+      editCatIndex: Math.max(0, catOptions.indexOf(dish.category || '自定义')),
+      catOptions: catOptions
+    });
+    wx.pageScrollTo({ scrollTop: 0, duration: 200 });
+  },
+
+  onEditInput(e) {
+    const key = e.currentTarget.dataset.key;
+    const form = Object.assign({}, this.data.editForm);
+    form[key] = e.detail.value;
+    this.setData({ editForm: form });
+  },
+
+  onEditCatChange(e) {
+    this.setData({ editCatIndex: Number(e.detail.value) || 0 });
+  },
+
+  onCancelEdit() {
+    this.setData({ editing: null, editForm: { name: '', desc: '', emoji: '', ingredients: '', tags: '' } });
+  },
+
+  async onSaveDish() {
+    const editing = this.data.editing;
+    if (!editing) return;
+    const form = this.data.editForm;
+    const name = String(form.name || '').trim();
+    if (!name) return api.toast('菜名不能为空');
+
+    // 「、」「,」「，」和空格都当分隔符，跟库存页的批量粘贴保持一致的直觉
+    const split = (s) =>
+      String(s || '')
+        .split(/[,，、;；\s]+/)
+        .map((x) => x.trim())
+        .filter(Boolean)
+        .slice(0, 10);
+
+    const category = this.data.catOptions[this.data.editCatIndex] || '自定义';
+    api.loading('保存中');
+    try {
+      await api.call('updateDish', {
+        id: editing._id,
+        patch: {
+          name: name,
+          category: category,
+          desc: String(form.desc || '').trim(),
+          emoji: String(form.emoji || '').trim() || '🍽',
+          ingredients: split(form.ingredients),
+          tags: split(form.tags).slice(0, 5)
+        }
+      });
+      api.hideLoading();
+      this.onCancelEdit();
+      await this.load();
+      api.toast('已保存：' + name + '（' + category + '）', 'success');
     } catch (err) {
       api.hideLoading();
       api.toastErr(err);

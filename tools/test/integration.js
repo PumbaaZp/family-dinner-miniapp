@@ -762,6 +762,61 @@ async function runBackend() {
   /* 场次是"归档"而不是"删除"：旧场次的订单还在，能用它查那一场 */
   r = await call('myDinners', {}, V1);
   expect('换场之后，客人仍然能看到并回到旧场次', r.data.dinners.filter((d) => d.no === 1).length === 1);
+
+  /* --- 改场次名字（"本次家宴名称"） --- */
+  r = await call('renameSession', { name: '0913场家宴' }, GUEST_C);
+  expect('非管理员不能改场次名字', r.ok === false && /权限/.test(r.msg), r.msg);
+  r = await call('renameSession', {}, HOST);
+  expect('空名字会被拒绝', r.ok === false && /名字/.test(r.msg), r.msg);
+
+  r = await call('renameSession', { name: '0913场家宴' }, HOST);
+  expect('改场次名字成功并返回改前改后',
+    r.ok && r.data.session.name === '0913场家宴' && r.data.session.no === 2 && r.data.session.current === true && r.data.prev === '中秋家宴',
+    JSON.stringify(r.data));
+  r = await call('summary', {}, HOST);
+  expect('看板上的场次名跟着变', r.data.session.name === '0913场家宴', JSON.stringify(r.data.session));
+  expect('场次列表里这一条也改了名（历史那场不受影响）',
+    r.data.sessions.filter((s) => s.id === r.data.session.id)[0].name === '0913场家宴' &&
+      r.data.sessions.filter((s) => s.no === 1)[0].name === '周六家宴',
+    JSON.stringify(r.data.sessions.map((s) => s.no + ':' + s.name)));
+  r = await call('votes', { sessionId: 'party' }, V1);
+  expect('改名字不会串改历史场次的名字', r.data.session.name === '周六家宴', JSON.stringify(r.data.session));
+  r = await call('renameSession', { name: '乱七八糟的名字超过二十个字就会被裁剪掉哦' }, HOST);
+  expect('名字超长会被裁剪', r.ok && r.data.session.name.length <= 20, '长度=' + (r.ok ? r.data.session.name.length : '-'));
+
+  /* --- 编辑菜品：临时加的菜能改分类和内容 --- */
+  r = await call('addDish', { name: '今天加的自定义菜', category: '自定义', available: true }, HOST);
+  const customId = r.data._id;
+  expect('新增的菜默认在「自定义」分类', r.ok === true);
+
+  r = await call('updateDish', {
+    id: customId,
+    patch: {
+      name: '油焖大虾',
+      category: '贝蟹虾',
+      desc: '虾壳煎出红油再焖，汤汁拌饭',
+      emoji: '🦐',
+      ingredients: ['大虾', '番茄酱', '小葱'],
+      tags: ['海鲜', '硬菜']
+    }
+  }, HOST);
+  expect('改菜名/分类/简介/图标/食材/标签都成功', r.ok === true, r.msg);
+
+  r = await call('listDishes', { all: true }, HOST);
+  const edited = r.data.dishes.filter((d) => d._id === customId)[0];
+  expect('改完之后分类不在「自定义」了', edited.category === '贝蟹虾', JSON.stringify(edited.category));
+  expect('内容都落库了',
+    edited.name === '油焖大虾' && edited.emoji === '🦐' && edited.desc.indexOf('红油') >= 0 &&
+      edited.ingredients.join(',') === '大虾,番茄酱,小葱' && edited.tags.join(',') === '海鲜,硬菜',
+    JSON.stringify(edited));
+  expect('改内容不会动上架状态和限量',
+    edited.available === true && edited.limit === null, JSON.stringify({ available: edited.available, limit: edited.limit }));
+
+  r = await call('updateDish', { id: customId, patch: { name: 'x' } }, GUEST_C);
+  expect('非管理员不能改菜品', r.ok === false && /权限/.test(r.msg), r.msg);
+  r = await call('updateDish', { id: customId, patch: {} }, HOST);
+  expect('空 patch 会被拒绝', r.ok === false && /字段/.test(r.msg), r.msg);
+  await call('removeDish', { id: customId }, HOST);
 }
 
 /**
@@ -918,9 +973,9 @@ async function loadPages() {
   const expectMethods = {
     index: ['bootstrap', 'buildShown', 'buildCats', 'dishRow', 'spyCat', 'measureSections', 'onPageScroll', 'onPlus', 'onMinus', 'onNote', 'onSubmit', 'onClearCart', 'reloadMenu', 'onInitAsHost', 'goMenu', 'goDashboard', 'onHide', 'onUnload', 'startDeadlineTick', 'stopDeadlineTick', 'onToggleBoard', 'loadBoard', 'mapBoard', 'onToggleLike', 'loadVotes', 'buildVoteList', 'onTapVote', 'onSubmitVotes', 'onClearVotes'],
     mine: ['refresh', 'applyOrder', 'onCancel', 'onCopy', 'onBecomeAdmin'],
-    menu: ['load', 'buildGroups', 'onToggleDish', 'onToggleCategory', 'batchAll', 'onLimitEdit', 'onImportSeed', 'onFillIngredients', 'onSaveSettings', 'onClearDeadline', 'onToggleDeadline', 'goPantry', 'onShowCoverage'],
+    menu: ['load', 'buildGroups', 'onToggleDish', 'onToggleCategory', 'batchAll', 'onLimitEdit', 'onImportSeed', 'onFillIngredients', 'onSaveSettings', 'onClearDeadline', 'onToggleDeadline', 'goPantry', 'onShowCoverage', 'onEditDish', 'onEditInput', 'onEditCatChange', 'onCancelEdit', 'onSaveDish'],
     pantry: ['load', 'render', 'putItem', 'onFormInput', 'onCatChange', 'onPickItem', 'onCancelEdit', 'onAdd', 'onRemove', 'onClearAll', 'onToggleQuick', 'onChipFilter', 'onToggleChip', 'onToggleBulk', 'onBulkInput', 'onBulkAdd', 'onRefresh'],
-    dashboard: ['load', 'mapOrders', 'mapIngredients', 'mapLikes', 'groupByCat', 'buildMenuText', 'buildDishIngredientText', 'buildShoppingText', 'copyText', 'onCopyMenu', 'onCopyDishIngredient', 'onCopyShopping', 'onToggleIngredient', 'onResetShopping', 'onResetVotes', 'previewText', 'onRefresh', 'onShow', 'onHide', 'onUnload', 'startAutoRefresh', 'scheduleRefresh', 'stopAutoRefresh', 'onDropDish', 'onDropOrderItem', 'dropDish', 'onDecItem', 'onEditItemQty', 'setItemQty']
+    dashboard: ['load', 'mapOrders', 'mapIngredients', 'mapLikes', 'groupByCat', 'buildMenuText', 'buildDishIngredientText', 'buildShoppingText', 'copyText', 'onCopyMenu', 'onCopyDishIngredient', 'onCopyShopping', 'onToggleIngredient', 'onResetShopping', 'onResetVotes', 'onRenameSession', 'onNewSession', 'previewText', 'onRefresh', 'onShow', 'onHide', 'onUnload', 'startAutoRefresh', 'scheduleRefresh', 'stopAutoRefresh', 'onDropDish', 'onDropOrderItem', 'dropDish', 'onDecItem', 'onEditItemQty', 'setItemQty']
   };
   Object.keys(expectMethods).forEach((key) => {
     const page = loaded[key];

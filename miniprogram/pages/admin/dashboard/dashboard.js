@@ -423,6 +423,25 @@ Page({
     }
   },
 
+  /** 给当前这一场改个名字（比如「0913场家宴」） */
+  async onRenameSession() {
+    const cur = this.data.session;
+    const input = await api.prompt('这一场叫什么？', '改这一场的名字', (cur && cur.name) || '第 1 场家宴');
+    if (input === null) return;
+    const name = String(input).trim();
+    if (!name) return api.toast('名字不能为空');
+    api.loading('保存中');
+    try {
+      const res = await api.call('renameSession', { name: name });
+      api.hideLoading();
+      await this.load({ silent: true });
+      api.toast('已改名：' + res.session.name, 'success');
+    } catch (err) {
+      api.hideLoading();
+      api.toastErr(err);
+    }
+  },
+
   /**
    * 开始新的一场家宴
    *

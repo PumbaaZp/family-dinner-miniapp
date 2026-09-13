@@ -1,5 +1,55 @@
 <view class="page page-with-footer">
 
+  <!-- 编辑菜品（点菜名右边的 ✎ 打开） -->
+  <view class="card card-edit" wx:if="{{editing}}">
+    <view class="card-title">
+      <text>✎ 编辑「{{editing.name}}」</text>
+      <text class="link" bindtap="onCancelEdit">取消</text>
+    </view>
+
+    <view class="field">
+      <view class="field-label">菜名</view>
+      <input class="input" value="{{editForm.name}}" data-key="name" bindinput="onEditInput" placeholder="例如：红烧排骨" />
+      <view class="muted" style="margin-top:8rpx">改名要小心：同名会被「导入内置菜库」当成同一道菜。</view>
+    </view>
+
+    <view class="row-2">
+      <view class="field picker-cell">
+        <view class="field-label">分类</view>
+        <picker mode="selector" range="{{catOptions}}" value="{{editCatIndex}}" bindchange="onEditCatChange">
+          <view class="picker">{{catOptions[editCatIndex]}}</view>
+        </picker>
+      </view>
+      <view class="field picker-cell">
+        <view class="field-label">图标（一个 emoji）</view>
+        <input class="input" value="{{editForm.emoji}}" data-key="emoji" bindinput="onEditInput" placeholder="🍖" />
+      </view>
+    </view>
+
+    <view class="field">
+      <view class="field-label">简介</view>
+      <input class="input" value="{{editForm.desc}}" data-key="desc" bindinput="onEditInput" placeholder="冰糖炒色慢火收汁，骨头都入味" />
+    </view>
+
+    <view class="field">
+      <view class="field-label">食材（「、」或逗号分隔）</view>
+      <input class="input" value="{{editForm.ingredients}}" data-key="ingredients" bindinput="onEditInput" placeholder="排骨、冰糖、生抽" />
+      <view class="muted" style="margin-top:8rpx">写全了才能跟「家里的库存」比对出「食材都有 / 缺几样」。</view>
+    </view>
+
+    <view class="field">
+      <view class="field-label">标签（最多 5 个）</view>
+      <input class="input" value="{{editForm.tags}}" data-key="tags" bindinput="onEditInput" placeholder="硬菜、下饭" />
+    </view>
+
+    <view class="muted" wx:if="{{editing.limit}}">这道菜限量 {{editing.limit}} 份，编辑不会动它；要改去列表里的「份」框。</view>
+
+    <view class="actions">
+      <view class="btn btn-ghost" bindtap="onCancelEdit">取消</view>
+      <view class="btn btn-primary" bindtap="onSaveDish">保存</view>
+    </view>
+  </view>
+
   <!-- 家宴设置 -->
   <view class="card">
     <view class="card-title">① 家宴设置</view>
@@ -115,6 +165,7 @@
         >{{d.haveFull ? '✅ ' : '🧺 '}}{{d.haveShort}}</view>
         <text class="drow-like" wx:if="{{d.likeText}}">{{d.likeText}}</text>
       </view>
+      <view class="drow-edit" data-id="{{d._id}}" catchtap="onEditDish">✎</view>
       <view class="drow-limit">
         <input
           class="limit-input"

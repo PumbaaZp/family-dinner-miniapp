@@ -1143,6 +1143,24 @@ async function handleResetVotes(openid, event) {
   return ok({ cleared: targets.length, sessionId: sessionId || '' });
 }
 
+/** 给当前这一场改个名字（只动名字，订单/点赞/库存毫发无损） */
+async function handleRenameSession(openid, event) {
+  const cfg = await requireAdmin(openid);
+  const cur = sessionOf(cfg);
+  const name = str(event.name, 20);
+  if (!name) throw new Error('名字不能为空');
+
+  // 同步改 sessions 列表里这一条（历史场次的名字不动）
+  const sessions = sessionListOf(cfg).map((s) =>
+    s.id === cur.id
+      ? { id: s.id, no: s.no, name: name, ts: s.ts }
+      : { id: s.id, no: s.no, name: s.name, ts: s.ts }
+  );
+
+  await saveConfig(Object.assign({}, cfg, { sessionName: name, sessions: sessions }));
+  return ok({ prev: cur.name, session: { id: cur.id, no: cur.no, name: name, ts: cur.ts, current: true } });
+}
+
 /**
  * 开始新的一场家宴（仅主人）
  *
@@ -1506,6 +1524,8 @@ exports.main = async (event) => {
         return await handleMyDinners(openid);
       case 'newSession':
         return await handleNewSession(openid, event);
+      case 'renameSession':
+        return await handleRenameSession(openid, event);
       default:
         return fail('未知操作：' + action);
     }

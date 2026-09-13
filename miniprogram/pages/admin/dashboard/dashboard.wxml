@@ -9,6 +9,7 @@
       <view class="hero-chip">{{closed ? '⏰ 已截止' : '🕒 截止 ' + deadlineText}}</view>
     </view>
     <view class="hero-links">
+      <text class="hero-link" bindtap="onRenameSession">✎ 改这一场的名字 ›</text>
       <text class="hero-link" bindtap="onNewSession">开始新的一场家宴 ›</text>
     </view>
   </view>

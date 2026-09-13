@@ -183,6 +183,7 @@
   opacity: 0.94;
   border-bottom: 2rpx solid rgba(255, 255, 255, 0.5);
   padding-bottom: 2rpx;
+  margin-right: 28rpx;
 }
 
 

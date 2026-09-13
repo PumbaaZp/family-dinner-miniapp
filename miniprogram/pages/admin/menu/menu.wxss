@@ -2,6 +2,21 @@
   padding-bottom: 60rpx;
 }
 
+/* 编辑面板：一眼看出"正在改东西"，别跟下面的卡片混在一起 */
+.card-edit {
+  border: 2rpx solid #f0c9a8;
+  background: #fffdfa;
+}
+
+/* 编辑入口（每行菜名右边的 ✎） */
+.drow-edit {
+  width: 56rpx;
+  text-align: center;
+  color: #c9401f;
+  font-size: 30rpx;
+  flex: none;
+}
+
 .row-2 {
   display: flex;
   gap: 20rpx;
