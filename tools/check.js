@@ -359,6 +359,52 @@ if (!fs.existsSync(importFile)) {
   }
 }
 
+/* ---------------- 9.5 迭代耗时统计（纯逻辑） ----------------
+   主人要"每次迭代花了多久"做统计。算法（怎么切段、怎么算分钟、手工校正优先）
+   必须钉住，不然统计出来的数字会悄悄变。这里用固定时间戳喂进去测，不碰 git。 */
+console.log('\n[9.5] 迭代耗时统计（纯逻辑）');
+
+{
+  const stats = require('./worklog-stats.js');
+  const at = (day, hhmm) => ({ hash: 'h' + day + hhmm, at: new Date('2026-09-20T' + hhmm + ':00'), atText: '2026-09-20 ' + hhmm, subject: 'feat: ' + hhmm });
+
+  // 10:00 → 10:10 → 10:40 → 11:00 都在 30 分钟内相连 → 同一次迭代（1 小时）
+  // 12:00 离上一次 60 分钟 → 另起一次（单提交 → 0 分钟）
+  const commits = [at(20, '10:00'), at(20, '10:10'), at(20, '10:40'), at(20, '11:00'), at(20, '12:00')];
+  const iters = stats.groupIterations(commits, 30);
+  ok('切段：间隔 ≤ 阈值算同一次迭代，超过就另起一次',
+    iters.length === 2 && iters[0].commits.length === 4 && iters[1].commits.length === 1,
+    JSON.stringify(iters.map((i) => i.commits.length)));
+  ok('耗时 = 末次提交 − 首次提交（单提交的一次记 0）',
+    iters[0].span === 60 && iters[1].span === 0, JSON.stringify(iters.map((i) => i.span)));
+  ok('按天归档到首次提交那天', iters[0].day === '2026-09-20', iters[0].day);
+
+  const withManual = stats.applyManual(stats.groupIterations(commits, 30), { h2010: 25 });
+  ok('手工校正优先于估算（写在哪一个提交上都认）',
+    withManual[0].minutes === 25 && withManual[0].estimated === false && withManual[1].minutes === 0 && withManual[1].estimated === true,
+    JSON.stringify(withManual.map((i) => [i.minutes, i.estimated])));
+
+  const per = stats.perCommit(commits, 30);
+  ok('按提交明细：第一个没有"距上次"，跨段的标出来',
+    per[0].minutes === null && per[1].minutes === 10 && per[4].minutes === 60 && per[4].acrossGap === true && per[1].acrossGap === false,
+    JSON.stringify(per.map((c) => c.minutes + (c.acrossGap ? '🕳' : ''))));
+
+  const sum = stats.summarize(stats.applyManual(iters, {}));
+  ok('按天汇总：迭代数/提交数/当日耗时都对得上',
+    sum.iterations === 2 && sum.commits === 5 && sum.totalMinutes === 60 && sum.days.length === 1 && sum.days[0].minutes === 60,
+    JSON.stringify({ iters: sum.iterations, commits: sum.commits, minutes: sum.totalMinutes, days: sum.days.length }));
+
+  ok('分钟 → 人话：<1 分钟 / 45 分钟 / 1 小时 / 1 小时 20 分',
+    stats.humanMinutes(0) === '<1 分钟' && stats.humanMinutes(45) === '45 分钟' &&
+      stats.humanMinutes(60) === '1 小时' && stats.humanMinutes(80) === '1 小时 20 分',
+    [0, 45, 60, 80].map(stats.humanMinutes).join(' / '));
+
+  const md = stats.renderMarkdown(iters, sum, { gapMin: 30, perCommit: per, firstAt: '2026-09-20 10:00', lastAt: '2026-09-20 12:00' });
+  ok('生成的统计文件里三张表都在（总览 / 按天 / 按迭代 / 按提交）',
+    md.indexOf('# 工作日志 · 迭代耗时统计') >= 0 && md.indexOf('## 总览') >= 0 &&
+      md.indexOf('## 按天') >= 0 && md.indexOf('## 按迭代明细') >= 0 && md.indexOf('## 按提交明细') >= 0);
+}
+
 /* ---------------- 10. 结果 ---------------- */
 console.log('\n[10] 结果');
 console.log('  通过 ' + pass + ' 项，失败 ' + fail + ' 项');
