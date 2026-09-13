@@ -49,6 +49,9 @@ Page({
     voteList: [],
     myVotes: [],
     myVoteText: '',
+    // 点一下就保存，所以要有"保存中/已保存/失败"的轻提示（不用弹窗打断）
+    voteHint: '',
+    voteHintBad: false,
     voterCount: 0,
     maxVotes: 3,
     pickCount: 0,
@@ -283,6 +286,7 @@ Page({
       const res = await api.call('votes', sessionId ? { sessionId: sessionId } : {});
       const maxVotes = Number(res.maxVotes) || 3;
       this.pickVotes = (res.myVotes || []).slice(0, maxVotes);
+      this.resetLikeDelta(); // 以服务端数据为准，清掉本地的乐观加减票
       this.setData({
         voteSessionId: (res.session && res.session.sessionId) || '',
         voteSession: res.session || null,
@@ -302,6 +306,11 @@ Page({
     }
   },
 
+  /** 拉云端数据时，本地的乐观加减票就没有意义了（以服务端为准） */
+  resetLikeDelta() {
+    this.likeDelta = {};
+  },
+
   /** 切换到另一场（我参加过的某一次）去点赞 */
   async onPickSession(e) {
     const id = e.currentTarget.dataset.id;
@@ -311,50 +320,118 @@ Page({
     api.hideLoading();
   },
 
-  /** 候选菜 + 当前勾选 → 渲染列表 */
+  /** 候选菜 + 当前勾选 → 渲染列表（点上就生效，所以还要带上本地刚加减的那一票） */
   buildVoteList() {
     const picked = this.pickVotes || [];
+    const delta = this.likeDelta || {};
     const list = (this.data.voteCandidates || []).map((c) =>
-      Object.assign({}, c, { picked: picked.indexOf(c.dishId) >= 0 })
+      Object.assign({}, c, {
+        picked: picked.indexOf(c.dishId) >= 0,
+        // 自己刚投/刚撤的那一票先算上，等后台数据回来再对齐（不然会出现"我明明赞了，还显示 1 人赞"）
+        likeCount: Math.max(0, (Number(c.likeCount) || 0) + (delta[c.dishId] || 0))
+      })
     );
     this.setData({ voteList: list, pickCount: picked.length });
   },
 
+  /**
+   * 点一下菜 = 立即生效（不再有"提交"按钮）
+   *
+   * 关键是**先本地生效、再把结果写回云端**：网络慢的时候点一下要等一秒才变色，
+   * 用起来像坏了。所以这里先乐观更新界面，再发请求；失败才回滚。
+   */
   onTapVote(e) {
     const id = e.currentTarget.dataset.id;
     const max = this.data.maxVotes || 3;
     const pick = (this.pickVotes || []).slice();
     const at = pick.indexOf(id);
+
     if (at >= 0) {
       pick.splice(at, 1);
+      this.bumpLike(id, -1);
     } else {
-      if (pick.length >= max) return api.toast('最多给 ' + max + ' 道菜点赞，先取消一个吧');
+      if (pick.length >= max) {
+        return api.toast('一场最多赞 ' + max + ' 道菜；想换的话，再点一下已选中的就能取消');
+      }
       pick.push(id);
+      this.bumpLike(id, 1);
     }
+
     this.pickVotes = pick;
     this.buildVoteList();
+    this.saveVotes();
   },
 
-  async onSubmitVotes() {
-    const pick = this.pickVotes || [];
-    if (!pick.length) return api.toast('先点几道你觉得好吃的菜');
-    api.loading('提交中');
-    try {
-      const res = await api.call('submitVotes', { dishIds: pick, sessionId: this.data.voteSessionId });
-      api.hideLoading();
-      await this.loadVotes(true, this.data.voteSessionId);
-      this.loadDinners();
-      const label = (res.session && res.session.name) || '';
-      api.toast('谢谢！已给「' + label + '」的 ' + res.count + ' 道菜点赞', 'success');
-    } catch (err) {
-      api.hideLoading();
-      api.toastErr(err);
+  /** 本地先加减一票（后台数据回来后会被真实值覆盖） */
+  bumpLike(id, n) {
+    const delta = Object.assign({}, this.likeDelta || {});
+    delta[id] = (delta[id] || 0) + n;
+    this.likeDelta = delta;
+  },
+
+  /**
+   * 把当前勾选写回云端
+   *
+   * 连点保护：一个请求还在飞的时候再点，只把最新的结果标成 dirty，
+   * 等这次回来再补一次请求（合并成一次，不会发出三个乱序的请求）。
+   */
+  async saveVotes() {
+    if (this._voting) {
+      this._voteDirty = true;
+      return;
     }
+    this._voting = true;
+    this.setData({ voteHint: '保存中…', voteHintBad: false });
+
+    try {
+      do {
+        this._voteDirty = false;
+        const ids = (this.pickVotes || []).slice();
+        const res = await api.call('submitVotes', { dishIds: ids, sessionId: this.data.voteSessionId });
+        // 以服务端确认的结果为准（它可能丢掉不存在的菜）
+        this.pickVotes = (res.dishIds || []).slice();
+        this._serverVotes = this.pickVotes.slice();
+        this.likeDelta = {};
+      } while (this._voteDirty);
+
+      this.buildVoteList();
+      const nameOf = {};
+      (this.data.voteCandidates || []).forEach((c) => {
+        nameOf[c.dishId] = c.name;
+      });
+      this.setData({
+        myVotes: this.pickVotes.slice(),
+        myVoteText: this.pickVotes.map((id) => nameOf[id]).filter(Boolean).join('、'),
+        voteHint: this.pickVotes.length ? '已保存 ✓' : '已清空 ✓',
+        voteHintBad: false
+      });
+      this.loadDinners(); // 场次标签上的「已投 ✓」
+      this.refreshVoteCounts(); // 顺带把"几人赞"对齐一下
+    } catch (err) {
+      // 失败就把本地乐观改动退回去，别让界面骗人
+      this.pickVotes = (this._serverVotes || []).slice();
+      this.likeDelta = {};
+      this.buildVoteList();
+      this.setData({ voteHint: (err && err.message) || '保存失败', voteHintBad: true });
+      api.toastErr(err);
+    } finally {
+      this._voting = false;
+    }
+  },
+
+  /** 稍后静默对齐一次（别人也投了的话，人数会变） */
+  refreshVoteCounts() {
+    if (this._countTimer) clearTimeout(this._countTimer);
+    this._countTimer = setTimeout(() => {
+      this._countTimer = null;
+      if (this._voting || this._voteDirty) return; // 用户还在点，别插队
+      this.loadVotes(true, this.data.voteSessionId);
+    }, 700);
   },
 
   async onClearVotes() {
     const name = (this.data.voteSession && this.data.voteSession.name) || '这一场';
-    const ok = await api.confirm('撤销我在「' + name + '」点的赞？');
+    const ok = await api.confirm('清空我在「' + name + '」点的赞？');
     if (!ok) return;
     api.loading('处理中');
     try {

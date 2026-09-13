@@ -990,7 +990,7 @@ async function loadPages() {
 
   /* 页面方法齐全性 */
   const expectMethods = {
-    index: ['bootstrap', 'buildShown', 'buildCats', 'dishRow', 'spyCat', 'measureSections', 'onPageScroll', 'onPlus', 'onMinus', 'onNote', 'onSubmit', 'onClearCart', 'reloadMenu', 'onInitAsHost', 'goMenu', 'goDashboard', 'onHide', 'onUnload', 'startDeadlineTick', 'stopDeadlineTick', 'onToggleBoard', 'loadBoard', 'mapBoard', 'onToggleLike', 'loadVotes', 'buildVoteList', 'onTapVote', 'onSubmitVotes', 'onClearVotes', 'loadDinners', 'onPickSession', 'onRetry'],
+    index: ['bootstrap', 'buildShown', 'buildCats', 'dishRow', 'spyCat', 'measureSections', 'onPageScroll', 'onPlus', 'onMinus', 'onNote', 'onSubmit', 'onClearCart', 'reloadMenu', 'onInitAsHost', 'goMenu', 'goDashboard', 'onHide', 'onUnload', 'startDeadlineTick', 'stopDeadlineTick', 'onToggleBoard', 'loadBoard', 'mapBoard', 'onToggleLike', 'loadVotes', 'buildVoteList', 'onTapVote', 'saveVotes', 'bumpLike', 'refreshVoteCounts', 'onClearVotes', 'loadDinners', 'onPickSession', 'onRetry'],
     mine: ['refresh', 'applyOrder', 'onCancel', 'onCopy', 'onBecomeAdmin'],
     menu: ['load', 'buildGroups', 'onToggleDish', 'onToggleCategory', 'batchAll', 'onLimitEdit', 'onImportSeed', 'onFillIngredients', 'onSaveSettings', 'onClearDeadline', 'onToggleDeadline', 'goPantry', 'onShowCoverage', 'onEditDish', 'onEditInput', 'onEditCatChange', 'onCancelEdit', 'onSaveDish'],
     pantry: ['load', 'render', 'putItem', 'onFormInput', 'onCatChange', 'onPickItem', 'onCancelEdit', 'onAdd', 'onRemove', 'onClearAll', 'onToggleQuick', 'onChipFilter', 'onToggleChip', 'onToggleBulk', 'onBulkInput', 'onBulkAdd', 'onRefresh'],
@@ -1586,9 +1586,15 @@ async function loadPages() {
     expect('库存页：同名不会变成两条', pctx.items.length === 2 && pctx.items.filter((i) => i.name === '生抽')[0].qty === '3瓶', JSON.stringify(pctx.items));
   }
 
-  /* ---- 点赞：朋友端点选 / 看板点赞榜 ---- */
+  /* ---- 点赞：点一下就生效 / 看板点赞榜 ---- */
   if (loaded.index) {
-    const likeCtx = {
+    expect('点赞页：菜品行上的 👍N 用【跨场次累计】（不然"来过三次都说好"看不出来）',
+      loaded.index.dishRow.call({ cart: {}, notes: {}, data: { likeMap: { d1: 9 }, likeMapAll: { d1: 3 } } }, { _id: 'd1', name: '红烧肉' }).likeText === '👍 3' &&
+        loaded.index.dishRow.call({ cart: {}, notes: {}, data: { likeMapAll: {} } }, { _id: 'd9', name: '没赞过的菜' }).likeText === '',
+      '有人赞显示累计 👍N，没人赞不显示');
+
+    /* 点一下就生效：没有提交按钮，点完立刻发请求 */
+    const voteCtx = {
       data: {
         voteCandidates: [
           { dishId: 'd1', name: '红烧肉', emoji: '🍖', qty: 2, ordered: true, likeCount: 3 },
@@ -1596,47 +1602,75 @@ async function loadPages() {
           { dishId: 'd3', name: '小米南瓜粥', emoji: '🥣', qty: 0, ordered: false, likeCount: 0 },
           { dishId: 'd4', name: '番茄炒蛋', emoji: '🍅', qty: 0, ordered: false, likeCount: 0 }
         ],
-        maxVotes: 3
+        maxVotes: 3,
+        voteSessionId: 'party'
       },
+      saved: [],
       setData(d) {
         Object.assign(this.data, d);
-      }
+      },
+      async saveVotes() {
+        this.saved.push((this.pickVotes || []).slice());
+      },
+      loadDinners() {},
+      api: { call: () => Promise.resolve({ dishIds: [] }) }
     };
-    likeCtx.buildVoteList = loaded.index.buildVoteList;
-    likeCtx.onTapVote = loaded.index.onTapVote;
-    likeCtx.pickVotes = [];
+    voteCtx.buildVoteList = loaded.index.buildVoteList;
+    voteCtx.onTapVote = loaded.index.onTapVote;
+    voteCtx.bumpLike = loaded.index.bumpLike;
+    voteCtx.pickVotes = [];
 
-    likeCtx.buildVoteList();
-    expect('点赞页：初始一个都没选，候选都在',
-      likeCtx.data.pickCount === 0 && likeCtx.data.voteList.length === 4 && likeCtx.data.voteList.every((v) => v.picked === false),
-      JSON.stringify(likeCtx.data.voteList.map((v) => v.name + ':' + v.picked)));
+    const tapVote = (id) => voteCtx.onTapVote.call(voteCtx, { currentTarget: { dataset: { id: id } } });
 
-    const tap = (id) => likeCtx.onTapVote.call(likeCtx, { currentTarget: { dataset: { id: id } } });
-    tap('d1');
-    tap('d2');
-    expect('点赞页：点一下选中，计数跟着变',
-      likeCtx.data.pickCount === 2 && likeCtx.data.voteList[0].picked === true && likeCtx.data.voteList[2].picked === false,
-      '已选=' + likeCtx.data.pickCount);
+    tapVote('d1');
+    tapVote('d2');
+    expect('点赞：点一下就立刻保存（不需要按提交）',
+      voteCtx.saved.length === 2 && voteCtx.saved[1].join(',') === 'd1,d2' && voteCtx.data.pickCount === 2,
+      JSON.stringify(voteCtx.saved));
 
-    tap('d1');
-    expect('点赞页：再点一下取消', likeCtx.data.pickCount === 1 && likeCtx.data.voteList[0].picked === false, '已选=' + likeCtx.data.pickCount);
+    tapVote('d1');
+    expect('点赞：再点一下是取消，并立刻保存', voteCtx.saved.length === 3 && voteCtx.saved[2].join(',') === 'd2', JSON.stringify(voteCtx.saved[2]));
 
-    tap('d1');
-    tap('d3');
-    expect('点赞页：选满 3 道', likeCtx.data.pickCount === 3, '已选=' + likeCtx.data.pickCount);
-    tap('d4'); // 第 4 道 → 应被挡住
-    expect('点赞页：超过 3 道点不动（前 3 道保持选中）',
-      likeCtx.data.pickCount === 3 && likeCtx.data.voteList[3].picked === false,
-      JSON.stringify(likeCtx.data.voteList.map((v) => v.name + ':' + v.picked)));
+    tapVote('d1');
+    tapVote('d3');
+    expect('点赞：选满 3 道', voteCtx.data.pickCount === 3 && voteCtx.saved[4].length === 3, JSON.stringify(voteCtx.saved[4]));
+    tapVote('d4');
+    expect('点赞：第 4 道点不动，也不会发请求',
+      voteCtx.data.pickCount === 3 && voteCtx.saved.length === 5 && voteCtx.data.voteList[3].picked === false,
+      '请求数=' + voteCtx.saved.length);
 
-    tap('d2'); // 已经选中的菜，点一下是取消（不受"已满 3 道"影响）
-    expect('点赞页：选满之后仍然能取消已选的那道', likeCtx.data.pickCount === 2 && likeCtx.data.voteList[1].picked === false,
-      JSON.stringify(likeCtx.data.voteList.map((v) => v.name + ':' + v.picked)));
+    expect('点赞：自己刚投的那一票立刻算进"几人赞"（不用等后台）',
+      voteCtx.data.voteList[0].likeCount === 4 && voteCtx.data.voteList[1].likeCount === 2,
+      JSON.stringify(voteCtx.data.voteList.map((v) => v.name + ':' + v.likeCount)));
 
-    expect('点赞页：菜品行上的 👍N 用【跨场次累计】（不然"来过三次都说好"看不出来）',
-      loaded.index.dishRow.call({ cart: {}, notes: {}, data: { likeMap: { d1: 9 }, likeMapAll: { d1: 3 } } }, { _id: 'd1', name: '红烧肉' }).likeText === '👍 3' &&
-        loaded.index.dishRow.call({ cart: {}, notes: {}, data: { likeMapAll: {} } }, { _id: 'd9', name: '没赞过的菜' }).likeText === '',
-      '有人赞显示累计 👍N，没人赞不显示');
+    // 保存失败要回滚，不能让界面骗人（页面里用的是同一个 api 模块对象，直接把它打成永远失败）
+    const voteApi = require(path.join(ROOT, 'miniprogram', 'utils', 'api.js'));
+    const realVoteCall = voteApi.call;
+    voteApi.call = () => Promise.reject(new Error('网络异常'));
+    const failCtx = {
+      data: { voteCandidates: [{ dishId: 'd1', name: '红烧肉', likeCount: 0 }], maxVotes: 3, voteSessionId: 'party' },
+      setData(d) {
+        Object.assign(this.data, d);
+      },
+      _serverVotes: [],
+      loadDinners() {},
+      toastErr() {},
+      refreshVoteCounts() {}
+    };
+    failCtx.buildVoteList = loaded.index.buildVoteList;
+    failCtx.onTapVote = loaded.index.onTapVote;
+    failCtx.bumpLike = loaded.index.bumpLike;
+    failCtx.saveVotes = loaded.index.saveVotes;
+    failCtx.pickVotes = [];
+    try {
+      failCtx.onTapVote.call(failCtx, { currentTarget: { dataset: { id: 'd1' } } });
+      await new Promise((r) => setTimeout(r, 30));
+      expect('点赞：保存失败会回滚本地勾选，并给出错误提示',
+        failCtx.pickVotes.length === 0 && failCtx.data.pickCount === 0 && failCtx.data.voteHintBad === true,
+        JSON.stringify({ pick: failCtx.pickVotes, hint: failCtx.data.voteHint, bad: failCtx.data.voteHintBad }));
+    } finally {
+      voteApi.call = realVoteCall;
+    }
 
     /* 场次切换：把某一场的票读回来 */
     const pickCtx = {

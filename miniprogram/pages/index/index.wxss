@@ -166,6 +166,18 @@
   line-height: 1.6;
 }
 
+/* 「保存中…／已保存 ✓」：点一下就生效，给一条不打断操作的轻提示 */
+.like-hint {
+  margin-top: 10rpx;
+  font-size: 22rpx;
+  color: #2e7d5b;
+  text-align: right;
+}
+
+.like-hint-bad {
+  color: #c0392b;
+}
+
 .like-empty {
   margin-top: 16rpx;
   font-size: 24rpx;

@@ -97,11 +97,12 @@
       </scroll-view>
 
       <view class="like-tip">
-        <block wx:if="{{isCurrentVote}}">挑最多 {{maxVotes}} 道你觉得最好吃的（已选 {{pickCount}}/{{maxVotes}}）。主人下次家宴就知道该做什么了。</block>
-        <block wx:else>这是「{{voteSession.name}}」那一场的菜单。改完记得点提交，只影响这一场。</block>
+        <block wx:if="{{isCurrentVote}}">点一下就直接记上，最多 {{maxVotes}} 道（已选 {{pickCount}}/{{maxVotes}}）；再点一下取消。主人下次家宴就知道该做什么了。</block>
+        <block wx:else>这是「{{voteSession.name}}」那一场的菜单，点一下就改，只影响这一场。</block>
       </view>
 
       <view class="like-mine" wx:if="{{myVoteText}}">你在这一场赞过：{{myVoteText}}</view>
+      <view class="like-hint {{voteHintBad ? 'like-hint-bad' : ''}}" wx:if="{{voteHint}}">{{voteHint}}</view>
 
       <view class="like-empty" wx:if="{{!voteList.length}}">
         这一场还没有人点菜，等大家点完再来投票吧。
@@ -122,11 +123,10 @@
         <view class="like-box {{item.picked ? 'like-box-on' : ''}}">{{item.picked ? '✓' : ''}}</view>
       </view>
 
-      <view class="like-actions">
-        <view class="btn btn-ghost" wx:if="{{myVotes.length}}" bindtap="onClearVotes">撤销这一场的</view>
-        <view class="btn btn-primary" bindtap="onSubmitVotes">提交点赞（{{pickCount}}/{{maxVotes}}）</view>
+      <view class="like-actions" wx:if="{{myVotes.length}}">
+        <view class="btn btn-ghost" bindtap="onClearVotes">清空我在这一场的赞</view>
       </view>
-      <view class="like-note">每场一人一票，同一场重新提交会覆盖上一次；去过好几场的话，每场都能投。</view>
+      <view class="like-note">每场一人一票，点一下立即生效；同一场再点就是改票。去过好几场的话，每场都能投。</view>
     </block>
   </view>
 
