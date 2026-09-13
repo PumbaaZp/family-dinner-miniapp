@@ -115,7 +115,7 @@
       <text>② 今晚的菜单</text>
       <text class="muted">已上架 {{onCount}} / {{total}}</text>
     </view>
-    <view class="muted">朋友端只会看到「已上架」的菜。菜库有 67 道，每次家宴挑 10 来道即可。</view>
+    <view class="muted">朋友端只会看到「已上架」的菜。菜库有 69 道，每次家宴挑 10 来道即可。</view>
 
     <view class="muted" style="margin-top:14rpx" wx:if="{{pantryCount}}">
       库存里记了 {{pantryCount}} 项食材，其中 {{canCookCount}} 道菜的食材家里已经齐了（看每道菜下面的小字）。

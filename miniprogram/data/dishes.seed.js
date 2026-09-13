@@ -43,6 +43,7 @@ module.exports = [
   { name: '凉拌黄瓜', category: '蔬菜', desc: '拍碎更入味，蒜末香醋一拌', emoji: '🥒', limit: null, tags: ['素', '解腻', '清淡'], ingredients: ['黄瓜', '大蒜', '香醋'], sort: 290, available: false },
   { name: '手撕包菜', category: '蔬菜', desc: '手撕比刀切入味，干辣椒炝锅', emoji: '🥬', limit: null, tags: ['素', '下饭', '微辣'], ingredients: ['包菜', '干辣椒', '大蒜'], sort: 300, available: false },
   { name: '清炒冬瓜', category: '蔬菜', desc: '切片快炒，清淡解腻', emoji: '🍈', limit: null, tags: ['素', '清淡', '解腻'], ingredients: ['冬瓜', '大蒜'], sort: 310, available: false },
+  { name: '油麦菜', category: '蔬菜', desc: '大火快炒，蒜香脆嫩不出水', emoji: '🥬', limit: null, tags: ['素', '快手', '清淡'], ingredients: ['油麦菜', '大蒜'], sort: 320, available: false },
 
   /* ---------------- 贝蟹虾 ---------------- */
   { name: '盐水河虾', category: '贝蟹虾', desc: '只放姜葱和盐，吃的就是那口鲜', emoji: '🦐', limit: null, tags: ['海鲜', '清淡', '硬菜'], ingredients: ['河虾', '生姜', '小葱'], sort: 410, available: false },
@@ -61,6 +62,7 @@ module.exports = [
   { name: '红烧豆腐鱼', category: '鱼类', desc: '肉像豆腐一样嫩，一抿就化', emoji: '🐟', limit: null, tags: ['海鲜', '清淡'], ingredients: ['豆腐鱼', '生抽', '老抽', '生姜', '小葱'], sort: 550, available: false },
   { name: '昂刺鱼豆腐汤', category: '鱼类', desc: '汤色奶白，鱼肉没有小刺', emoji: '🍲', limit: null, tags: ['汤', '海鲜', '暖胃'], ingredients: ['昂刺鱼', '豆腐', '生姜', '小葱'], sort: 560, available: false },
   { name: '香煎青花鱼', category: '鱼类', desc: '鱼皮煎到焦脆，挤点柠檬', emoji: '🐟', limit: null, tags: ['海鲜', '下饭'], ingredients: ['青花鱼', '柠檬', '生姜'], sort: 570, available: false },
+  { name: '黄鱼烧年糕', category: '鱼类', desc: '小黄鱼煎香，年糕吸饱鱼汤，鲜糯入味', emoji: '🐟', limit: null, tags: ['海鲜', '硬菜', '主食'], ingredients: ['小黄鱼', '年糕', '生抽', '老抽', '冰糖', '生姜', '小葱'], sort: 580, available: false },
 
   /* ---------------- 主食 ---------------- */
   { name: '米饭', category: '主食', desc: '新米现焖，粒粒分明', emoji: '🍚', limit: null, tags: ['主食'], ingredients: ['大米'], sort: 610, available: false },
