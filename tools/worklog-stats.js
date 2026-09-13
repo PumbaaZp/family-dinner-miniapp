@@ -192,6 +192,9 @@ function renderMarkdown(iterations, stats, meta) {
   lines.push('');
   lines.push('> 这个文件是**自动生成**的：`node tools/worklog-stats.js`。别手改，改完下次就被覆盖了。');
   lines.push('> 想写"实际耗时"，编辑 `tools/worklog-manual.json`（`{ "' + (iterations[0] ? iterations[0].commits[0].hash : 'abc1234') + '": 35 }`），它优先于估算值。');
+  lines.push('>');
+  lines.push('> 统计到这个提交为止：`' + ((meta.perCommit && meta.perCommit.length) ? meta.perCommit[meta.perCommit.length - 1].hash : '—') + '`（' + (meta.lastAt || '—') + '）。');
+  lines.push('> **你正在做的这一次提交不在内** —— 数字永远比工作区慢一拍，下次跑就补上了，别当成算错。');
   lines.push('');
   lines.push('**口径**（很重要，不写清楚数字会骗人）：');
   lines.push('');
