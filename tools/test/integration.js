@@ -827,10 +827,25 @@ async function runBackend() {
   r = await call('submitVotes', { dishIds: [dishB._id] }, V1);
   expect('开席之后就能投票了', r.ok === true && r.data.session.no === 9, r.msg + ' ' + JSON.stringify(r.data.session));
 
-  // 收尾：把这一场的票和单都撤掉，再还原当前场次，后面的断言不受影响
-  r = await call('resetVotes', { sessionId: 's_not_started' }, HOST);
-  expect('清空指定场次的点赞：只清那还没开席的一场', r.ok && r.data.cleared === 1, JSON.stringify(r.data));
+  // 那一单又被撤掉 → 这一场重新变成"没开席"，但我的票还在（这就是"误投"的处境）
   await call('cancelOrder', {}, 'openid_first_order');
+  r = await call('votes', {}, V1);
+  expect('单被撤掉后又回到"没开席"，但我自己的票仍然看得见',
+    r.data.started === false && r.data.myVotes.length === 1,
+    JSON.stringify({ started: r.data.started, mine: r.data.myVotes }));
+  r = await call('submitVotes', { dishIds: [dishA._id] }, V1);
+  expect('没开席 + 自己已经有票：允许改（改的是自己那张，不会凭空多出一票）',
+    r.ok === true && r.data.count === 1 && r.data.session.no === 9,
+    r.msg + ' ' + JSON.stringify(r.data));
+  r = await call('votes', {}, V1);
+  expect('改完之后仍然是同一张票（没有变成两张）',
+    r.data.myVotes.length === 1 && r.data.myVotes[0] === dishA._id, JSON.stringify(r.data.myVotes));
+  r = await call('submitVotes', { dishIds: [] }, V1);
+  expect('但已经投过的人可以撤掉自己的票（不然连撤都撤不掉）', r.ok === true && r.data.cleared === true, JSON.stringify(r.data));
+
+  // 收尾：把这一场的票清干净、还原当前场次，后面的断言不受影响
+  r = await call('resetVotes', { sessionId: 's_not_started' }, HOST);
+  expect('这一场的票已经自己撤干净了（再清是 0 条）', r.ok && r.data.cleared === 0 && r.data.sessionId === 's_not_started', JSON.stringify(r.data));
   cfgRo.sessionId = keepSession.sessionId;
   cfgRo.sessionNo = keepSession.sessionNo;
   cfgRo.sessionName = keepSession.sessionName;
@@ -839,6 +854,8 @@ async function runBackend() {
   expect('还原当前场次后：又是原来的第 2 场',
     r.data.session.id === keepSession.sessionId && r.data.session.no === 2 && r.data.isCurrent === true,
     JSON.stringify(r.data.session));
+  r = await call('votes', {}, V1);
+  expect('上面那一通操作没动到第 2 场的票（我这一场的票还在）', r.data.myVotes.length === 1, JSON.stringify(r.data.myVotes));
 
   /* --- 主人能看到"这道菜是谁赞的" --- */
   // 注意用 dishA/dishB（刚查出来的、确实还在菜库里的菜）：

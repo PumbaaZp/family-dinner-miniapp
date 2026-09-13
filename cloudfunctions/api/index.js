@@ -1160,8 +1160,11 @@ async function handleSubmitVotes(openid, event) {
   const mine = pickSession(votes, sessionId).filter((v) => v._openid === openid)[0];
   const participated = isCurrent || !!mine || pickSession(orderRes.data, sessionId).some((o) => o._openid === openid);
   if (!participated) throw new Error('这一场家宴你没参加过，投不了票');
-  // 没开席（这一场还没有任何人点单）就不能投——不然主人一建好下一场，朋友就能提前把票投了
-  if (!sessionStarted(orderRes.data, sessionId)) {
+  // 没开席（这一场还没有任何人点单）就不能投——不然主人一建好下一场，朋友就能提前把票投了。
+  //
+  // 唯一的例外：**你这一场已经有票了**。那种票是"没开席时投进去的"（早先版本留下的误投，
+  // 或者你自己在别的设备上投的）。允许你改或者撤，不然你连撤都撤不掉，只能等主人去后台清。
+  if (!sessionStarted(orderRes.data, sessionId) && !mine) {
     throw new Error('这一场还没开席（还没有人点单），等大家点完菜再来投吧');
   }
 
