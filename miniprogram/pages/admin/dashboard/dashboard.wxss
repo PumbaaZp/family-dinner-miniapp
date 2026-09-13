@@ -172,6 +172,49 @@
 
 /* ============ 点赞榜 ============ */
 
+/* 场次切换：横滑一排，点一下回看某一场 */
+.sess-bar {
+  margin-top: 20rpx;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.sess {
+  display: inline-block;
+  font-size: 23rpx;
+  color: #574a42;
+  background: #fff;
+  border: 2rpx solid #ece3d9;
+  border-radius: 999rpx;
+  padding: 12rpx 24rpx;
+  margin-right: 12rpx;
+  box-shadow: 0 2rpx 8rpx rgba(120, 90, 70, 0.06);
+}
+
+.sess-on {
+  color: #fff;
+  background: linear-gradient(135deg, #e05a35 0%, #c9401f 100%);
+  border-color: #c9401f;
+}
+
+.sess-mark {
+  font-size: 19rpx;
+  opacity: 0.85;
+  margin-left: 8rpx;
+}
+
+/* 「还没投的」：主人催票用 */
+.lk-miss {
+  margin-top: 14rpx;
+  font-size: 22rpx;
+  color: #b06a3c;
+  background: #fdf2e7;
+  border-radius: 10rpx;
+  padding: 12rpx 18rpx;
+  line-height: 1.5;
+}
+
+
 /* 状态条上的入口（"开始新的一场家宴"） */
 .hero-links {
   margin-top: 18rpx;

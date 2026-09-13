@@ -29,10 +29,15 @@ Page({
     // 客人的点赞（吃完的反馈，下次菜单的参考）
     likes: [],
     likesAll: [],
-    likeStats: { voters: 0, likedDishes: 0, votersAll: 0, likedDishesAll: 0 },
-    // 当前场次（后厨看板只看这一场；历史场次留在点赞榜里做参考）
+    likeStats: { voters: 0, likedDishes: 0, votersAll: 0, likedDishesAll: 0, notVotedText: '' },
+    // 当前场次（后厨看板默认只看这一场；可以切到历史场次回看）
     session: null,
     sessionText: '',
+    currentSession: null,
+    // 正在看哪一场：空 = 当前这一场
+    viewSessionId: '',
+    sessions: [],
+    isCurrentView: true,
     // 三种导出的文本，load 时生成好，点按钮直接复制
     menuText: '',
     dishIngText: '',
@@ -88,6 +93,7 @@ Page({
     if (this._loading) return;
     this._loading = true;
     const silent = !!(opts && opts.silent);
+    const sessionId = opts && 'sessionId' in opts ? opts.sessionId || '' : this.data.viewSessionId || '';
     if (!silent) this.setData({ loading: true });
     try {
       const session = await app.ensureSession(false);
@@ -98,7 +104,7 @@ Page({
         return;
       }
 
-      const res = await api.call('summary');
+      const res = await api.call('summary', sessionId ? { sessionId: sessionId } : {});
       const cfg = res.config || {};
       const deadlineTs = Number(cfg.deadlineTs) || 0;
 
@@ -131,8 +137,22 @@ Page({
         hasHostOrder: orders.some((o) => o.isHost),
         likes: this.mapLikes(res.likes),
         likesAll: this.mapLikes(res.likesAll),
-        likeStats: res.likeStats || { voters: 0, likedDishes: 0, votersAll: 0, likedDishesAll: 0 },
+        likeStats: Object.assign({ notVotedText: '' }, res.likeStats, {
+          // 这一场点过单、但还没投票的人（主人催票用）
+          notVotedText: ((res.likeStats && res.likeStats.notVoted) || []).join('、')
+        }),
         session: res.session || null,
+        currentSession: res.current || null,
+        isCurrentView: res.isCurrent !== false,
+        viewSessionId: (res.session && res.session.id) || '',
+        sessions: (res.sessions || []).map((s) => ({
+          sessionId: s.id,
+          no: s.no,
+          name: s.name,
+          current: !!(res.current && s.id === res.current.id),
+          // 正在看的那一场要高亮
+          active: !!(res.session && s.id === res.session.id)
+        })),
         sessionText: res.session ? res.session.name + '（第 ' + res.session.no + ' 场）' : '',
         ingredientStats: res.ingredientStats || { total: 0, missing: 0, purchased: 0, inStock: 0, pantryCount: 0 },
         deadlineText: deadlineTs ? fmt.fmtShort(deadlineTs) + '（' + fmt.countdown(deadlineTs) + '）' : '不限时间',
@@ -427,6 +447,35 @@ Page({
     } catch (err) {
       api.hideLoading();
       api.toastErr(err);
+    }
+  },
+
+  /**
+   * 切换看哪一场
+   *
+   * 切到历史场次就是「只看不改」：点单明细和点赞榜都换成那一场的，
+   * 操作按钮（不做/减份数）会收起来，免得手滑改到已经结束的家宴。
+   */
+  async onPickSession(e) {
+    const id = e.currentTarget.dataset.id;
+    if (!id || id === this.data.viewSessionId) return;
+    const cur = this.data.currentSession || {};
+    await this.switchSession(id === cur.id ? '' : id);
+  },
+
+  /** 回到当前这一场 */
+  async onBackToCurrent() {
+    if (this.data.isCurrentView) return;
+    await this.switchSession('');
+  },
+
+  async switchSession(sessionId) {
+    api.loading('切换中');
+    try {
+      await this.load({ sessionId: sessionId });
+      this._ingSig = ''; // 场次换了，采购清单要重画
+    } finally {
+      api.hideLoading();
     }
   },
 

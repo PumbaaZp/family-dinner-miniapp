@@ -45,6 +45,8 @@ Page({
     voteSessionId: '',
     voteSession: null,
     isCurrentVote: true,
+    // 这一场开席了吗（有人点过单才算）
+    voteStarted: true,
     voteCandidates: [],
     voteList: [],
     myVotes: [],
@@ -288,9 +290,11 @@ Page({
       this.pickVotes = (res.myVotes || []).slice(0, maxVotes);
       this.resetLikeDelta(); // 以服务端数据为准，清掉本地的乐观加减票
       this.setData({
-        voteSessionId: (res.session && res.session.sessionId) || '',
+        voteSessionId: (res.session && res.session.id) || '',
         voteSession: res.session || null,
         isCurrentVote: !!res.isCurrent,
+        // 开席了吗：这一场还没人点过单 → 不显示可投列表（免得下一场还没开始就被投票）
+        voteStarted: res.started !== false,
         voteCandidates: res.candidates || [],
         myVotes: res.myVotes || [],
         myVoteText: (res.myVoteNames || []).join('、'),

@@ -97,16 +97,17 @@
       </scroll-view>
 
       <view class="like-tip">
-        <block wx:if="{{isCurrentVote}}">点一下就直接记上，最多 {{maxVotes}} 道（已选 {{pickCount}}/{{maxVotes}}）；再点一下取消。主人下次家宴就知道该做什么了。</block>
+        <block wx:if="{{!voteStarted}}">这一场还没开席（还没有人点单）——等大家点完菜、开饭之后再来投票吧。</block>
+        <block wx:elif="{{isCurrentVote}}">点一下就直接记上，最多 {{maxVotes}} 道（已选 {{pickCount}}/{{maxVotes}}）；再点一下取消。主人下次家宴就知道该做什么了。</block>
         <block wx:else>这是「{{voteSession.name}}」那一场的菜单，点一下就改，只影响这一场。</block>
       </view>
 
       <view class="like-mine" wx:if="{{myVoteText}}">你在这一场赞过：{{myVoteText}}</view>
       <view class="like-hint {{voteHintBad ? 'like-hint-bad' : ''}}" wx:if="{{voteHint}}">{{voteHint}}</view>
-      <view class="like-hint like-hint-link" wx:if="{{pickCount && !nick}}" bindtap="onSetVoteNick">主人看不到是谁赞的 —— 点这里留个名字 ›</view>
+      <view class="like-hint like-hint-link" wx:if="{{voteStarted && pickCount && !nick}}" bindtap="onSetVoteNick">主人看不到是谁赞的 —— 点这里留个名字 ›</view>
 
       <view class="like-empty" wx:if="{{!voteList.length}}">
-        这一场还没有人点菜，等大家点完再来投票吧。
+        {{voteStarted ? '这一场还没有人点菜，等大家点完再来投票吧。' : '这一场还没开席，等有人点菜之后再来投票。'}}
       </view>
 
       <view

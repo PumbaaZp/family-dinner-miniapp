@@ -33,6 +33,9 @@ const LEGACY_SESSION = 'party';
 /** 每人最多给几道菜点赞 */
 const MAX_VOTES = 3;
 
+/** 没填昵称时的占位名。注意它不是"一个人的名字"，只用来显示 */
+const ANON_NICK = '匿名朋友';
+
 /** 库存分类：固定三种，前端筛选/分组都按这个顺序 */
 const PANTRY_CATS = ['食材', '调料', '其他'];
 const MAX_PANTRY = 300;
@@ -210,16 +213,23 @@ function sessionListOf(cfg) {
   return list.sort((a, b) => b.no - a.no || b.ts - a.ts);
 }
 
+/**
+ * 某一场的对外描述：{ id, no, name, ts, current }。
+ *
+ * 字段名统一用 `id`（跟 sessions 数组里存的一致），不要再叫 sessionId ——
+ * 以前这里是 sessionId、sessionOf 那边是 id，前端写成 `session.id` 就悄悄拿到 undefined，
+ * 「清空本场点赞」会因此变成「清空全部点赞」。一个键名，一个来源。
+ */
 function sessionLabel(cfg, sessionId) {
   const cur = sessionOf(cfg);
   // 当前这一场直接用 config 里的最新值，不看 sessions 数组里的存档
   if (sessionId === cur.id) {
-    return { sessionId: cur.id, no: cur.no, name: cur.name, ts: cur.ts, current: true };
+    return { id: cur.id, no: cur.no, name: cur.name, ts: cur.ts, current: true };
   }
   const hit = sessionListOf(cfg).filter((s) => s.id === sessionId)[0];
   const one = hit || { id: sessionId, no: 0, name: '家宴', ts: 0 };
   return {
-    sessionId: one.id,
+    id: one.id,
     no: one.no,
     name: one.name,
     ts: one.ts,
@@ -236,6 +246,17 @@ async function findMyOrder(openid, sessionId) {
 /** 只保留某一场的订单 / 点赞 */
 function pickSession(docs, sessionId) {
   return (docs || []).filter((d) => sessionIdOf(d) === sessionId);
+}
+
+/**
+ * 这一场"开席"了吗：有人点过单才算。
+ *
+ * 为什么需要这道门槛：主人一建好下一场，它就变成"当前这一场"，
+ * 而当前场次的点赞候选＝现在上架的菜 —— 于是**下一场还没开始，朋友点开就能投票**。
+ * 用"有人点过单"当开席信号最直白：这一场真的发生过。
+ */
+function sessionStarted(orderDocs, sessionId) {
+  return (orderDocs || []).some((o) => sessionIdOf(o) === sessionId);
 }
 
 /** 对外暴露的配置：非管理员看不到主人口令 */
@@ -570,7 +591,7 @@ async function handleSubmitOrder(openid, event) {
     sessionId: session.id,
     sessionNo: session.no,
     sessionName: session.name,
-    nick: str(event.nick, 20) || '匿名朋友',
+    nick: str(event.nick, 20) || ANON_NICK,
     partySize: int(event.partySize, 1, 1, 50),
     arriveAt: str(event.arriveAt, 20),
     note: str(event.note, 100),
@@ -616,7 +637,7 @@ async function handleCancelOrder(openid) {
 function aggregateOrders(cfg, orderDocs, dishDocs, withOrderId, likeMap) {
   const orders = (orderDocs || []).map((o) => {
     const one = {
-      nick: o.nick || '匿名朋友',
+      nick: o.nick || ANON_NICK,
       partySize: Number(o.partySize) || 1,
       arriveAt: o.arriveAt || '',
       note: o.note || '',
@@ -929,17 +950,21 @@ function buildNickIndex(orderDocs) {
   const m = {};
   (orderDocs || []).forEach((o) => {
     if (!o || !o._openid) return;
-    m[sessionIdOf(o) + '|' + o._openid] = str(o.nick, 20) || '匿名朋友';
+    m[sessionIdOf(o) + '|' + o._openid] = str(o.nick, 20) || ANON_NICK;
   });
   return m;
 }
 
 /** 一条点赞记录是谁赞的：优先用它自己存的昵称（快照），否则回退到那一场的订单昵称 */
 function voterNameOf(voteDoc, nickIndex) {
-  const own = str(voteDoc && voteDoc.nick, 20);
-  if (own) return own;
   const key = sessionIdOf(voteDoc) + '|' + ((voteDoc && voteDoc._openid) || '');
-  return (nickIndex || {})[key] || '匿名朋友';
+  const fromOrder = (nickIndex || {})[key];
+  const own = str(voteDoc && voteDoc.nick, 20);
+  // 「匿名朋友」是没填名字时的**占位**，不算真名：
+  // 不然同一个人"点赞时没填名字、点单时填了"就会被当成两个人，
+  // 连着名字对不上的还有催票名单（明明投过了却被列进"还没投"）。
+  if (own && own !== ANON_NICK) return own;
+  return fromOrder || own || ANON_NICK;
 }
 
 /** [{ dishId, count }] → { dishId: count }，给菜品行直接取用 */
@@ -1080,20 +1105,25 @@ async function handleVotes(openid, event) {
   const sessionVotes = pickSession(votes, wantId);
   const sessionOrders = pickSession(orderRes.data, wantId);
   const mine = sessionVotes.filter((v) => v._openid === openid)[0];
+  const started = sessionStarted(orderRes.data, wantId);
 
   const totals = buildLikeTotals(sessionVotes, dishRes.data);
   const totalsAll = buildLikeTotals(votes, dishRes.data);
   const likeMap = likeMapOf(totals);
   const myVotes = mine ? (mine.items || []).map((i) => i.dishId) : [];
+  const participated = isCurrent || !!mine || sessionOrders.some((o) => o._openid === openid);
 
   return ok({
     session: session,
     current: cur,
     isCurrent: isCurrent,
-    canVote: isCurrent || !!mine || sessionOrders.some((o) => o._openid === openid),
+    // 开席了吗：没开席就没什么可投的，客户端会显示"等大家点完菜再来投票"
+    started: started,
+    canVote: started && participated,
     myVotes: myVotes,
     myVoteNames: mine ? (mine.items || []).map((i) => i.name) : [],
-    candidates: buildBallot(sessionOrders, dishRes.data, likeMap, myVotes, isCurrent),
+    // 没开席时不列候选（除非我自己已经有票——那也得让我看得到、撤得掉）
+    candidates: started || mine ? buildBallot(sessionOrders, dishRes.data, likeMap, myVotes, isCurrent) : [],
     totals: totals,
     totalsAll: totalsAll,
     likeMap: likeMap,
@@ -1130,6 +1160,10 @@ async function handleSubmitVotes(openid, event) {
   const mine = pickSession(votes, sessionId).filter((v) => v._openid === openid)[0];
   const participated = isCurrent || !!mine || pickSession(orderRes.data, sessionId).some((o) => o._openid === openid);
   if (!participated) throw new Error('这一场家宴你没参加过，投不了票');
+  // 没开席（这一场还没有任何人点单）就不能投——不然主人一建好下一场，朋友就能提前把票投了
+  if (!sessionStarted(orderRes.data, sessionId)) {
+    throw new Error('这一场还没开席（还没有人点单），等大家点完菜再来投吧');
+  }
 
   const raw = Array.isArray(event.dishIds) ? event.dishIds : [];
   const byId = {};
@@ -1156,7 +1190,7 @@ async function handleSubmitVotes(openid, event) {
     sessionNo: label.no,
     sessionName: label.name,
     // 存下提交时的昵称快照：主人要靠它看出"这道菜是谁赞的"
-    nick: str(event.nick, 20) || '匿名朋友',
+    nick: str(event.nick, 20) || ANON_NICK,
     items: items,
     updatedAt: db.serverDate()
   };
@@ -1258,26 +1292,37 @@ async function handleNewSession(openid, event) {
 }
 
 /** 后厨看板汇总（仅主人） */
-async function handleSummary(openid) {
+/**
+ * 后厨看板汇总（仅主人）
+ *
+ * event.sessionId 不传 = 当前这一场；传了 = 回看那一场的历史（点单明细 + 点赞榜都按那一场）。
+ * 唯一例外：**食材采购永远按当前这一场算** —— 买菜是给"现在"买的，回看历史场次时不该换。
+ */
+async function handleSummary(openid, event) {
   await requireAdmin(openid);
   const cfg = await getConfig();
-  const session = sessionOf(cfg);
+  const cur = sessionOf(cfg);
+  const viewId = str(event && event.sessionId, 32) || cur.id;
+  const isCurrent = viewId === cur.id;
+
   const [orderRes, dishRes, votes] = await Promise.all([
     db.collection('orders').orderBy('createdAt', 'asc').limit(MAX_LIMIT).get(),
     db.collection('dishes').limit(MAX_LIMIT).get(),
     readVotes()
   ]);
 
-  // 后厨看板只看**当前这一场**：上一场的订单留着做历史，但不该出现在今晚的汇总里
-  const orders = pickSession(orderRes.data, session.id);
-  const sessionVotes = pickSession(votes, session.id);
+  const orders = pickSession(orderRes.data, viewId);
+  const sessionVotes = pickSession(votes, viewId);
 
   // 主人端能看到"是谁赞的"，所以这两处 buildLikeTotals 都带 withWho
   const nickIndex = buildNickIndex(orderRes.data);
   const likes = buildLikeTotals(sessionVotes, dishRes.data, nickIndex, true);
   const likesAll = buildLikeTotals(votes, dishRes.data, nickIndex, true);
   const data = aggregateOrders(cfg, orders, dishRes.data, true, likeMapOf(likes));
-  const ingredients = buildIngredients(dishRes.data, orders, cfg.shopping || {}, cfg.pantry || {});
+
+  // 食材采购只跟当前这一场有关
+  const currentOrders = pickSession(orderRes.data, cur.id);
+  const ingredients = buildIngredients(dishRes.data, currentOrders, cfg.shopping || {}, cfg.pantry || {});
   const pantry = pantryList(cfg);
 
   // 三个数加起来正好是 total：家里有的 / 已经买了的 / 还要买的
@@ -1285,9 +1330,28 @@ async function handleSummary(openid) {
   const purchased = ingredients.filter((i) => i.purchased && !i.inStock).length;
   const missing = ingredients.length - inStock - purchased;
 
+  // 这一场点过单、但还没投票的人（主人要催票时看这个；主人自己不算）
+  //
+  // 判定用 openid 而不是昵称：昵称是客户端手填的，可能没填（占位「匿名朋友」）、
+  // 可能两个人重名。按名字比对会把"投过的人"错认成"没投的人"，催票就催错了。
+  // 名字只用来显示。
+  const votedOpenids = {};
+  sessionVotes.forEach((v) => {
+    if (v && v._openid) votedOpenids[String(v._openid)] = true;
+  });
+  const notVoted = [];
+  orders.forEach((o) => {
+    if ((cfg.admins || []).indexOf(o._openid) >= 0) return;
+    if (o._openid && votedOpenids[String(o._openid)]) return;
+    const n = voterNameOf({ _openid: o._openid, nick: o.nick, sessionId: viewId }, nickIndex);
+    if (notVoted.indexOf(n) < 0) notVoted.push(n);
+  });
+
   return ok(
     Object.assign({ config: publicConfig(cfg, true) }, data, {
-      session: session,
+      session: sessionLabel(cfg, viewId),
+      current: cur,
+      isCurrent: isCurrent,
       sessions: sessionListOf(cfg),
       ingredients: ingredients,
       pantry: pantry,
@@ -1298,7 +1362,8 @@ async function handleSummary(openid) {
         likedDishes: likes.length,
         maxVotes: MAX_VOTES,
         votersAll: votes.length,
-        likedDishesAll: likesAll.length
+        likedDishesAll: likesAll.length,
+        notVoted: notVoted
       },
       ingredientStats: {
         total: ingredients.length,
@@ -1554,7 +1619,7 @@ exports.main = async (event) => {
       case 'cancelOrder':
         return await handleCancelOrder(openid);
       case 'summary':
-        return await handleSummary(openid);
+        return await handleSummary(openid, event);
       case 'board':
         return await handleBoard();
       case 'dropDish':

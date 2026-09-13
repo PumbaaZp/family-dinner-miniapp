@@ -723,7 +723,7 @@ async function runBackend() {
   r = await call('submitVotes', { dishIds: [dishB._id], sessionId: 'party' }, STRANGER);
   expect('没参加过的场次不能投票', r.ok === false && /没参加/.test(r.msg), r.msg);
   r = await call('submitVotes', { dishIds: [dishA._id] }, STRANGER);
-  expect('当前这一场谁都能投（没点单也能投）', r.ok === true, r.msg);
+  expect('当前这一场：我本人没点单也能投（只要这一场已经开席了）', r.ok === true, r.msg);
 
   r = await call('resetVotes', { sessionId: 'party' }, GUEST_C);
   expect('非管理员不能清空某一场的点赞', r.ok === false && /权限/.test(r.msg), r.msg);
@@ -762,6 +762,83 @@ async function runBackend() {
   /* 场次是"归档"而不是"删除"：旧场次的订单还在，能用它查那一场 */
   r = await call('myDinners', {}, V1);
   expect('换场之后，客人仍然能看到并回到旧场次', r.data.dinners.filter((d) => d.no === 1).length === 1);
+
+  /* --- 主人端回看历史场次：点单/点赞按那一场算，食材采购永远按当前这一场 --- */
+  const nowSum = (await call('summary', {}, HOST)).data;
+  const oldSum = (await call('summary', { sessionId: 'party' }, HOST)).data;
+  expect('主人端能回看第 1 场（isCurrent=false + 那一场的序号/名字）',
+    oldSum.isCurrent === false && oldSum.session.id === 'party' && oldSum.session.no === 1 && !!oldSum.session.name,
+    JSON.stringify(oldSum.session));
+  expect('回看第 1 场：点单明细是那一场的份数（×1），不是当前这一场的 ×2',
+    (oldSum.orders.filter((o) => o.nick === '老客人')[0] || {}).totalQty === 1,
+    JSON.stringify(oldSum.orders.map((o) => o.nick + '×' + o.totalQty)));
+  expect('当前这一场（第 2 场）同一人是 ×2（两场的数据确实分开了）',
+    (nowSum.orders.filter((o) => o.nick === '老客人')[0] || {}).totalQty === 2,
+    JSON.stringify(nowSum.orders.map((o) => o.nick + '×' + o.totalQty)));
+  expect('回看历史场次时，食材采购仍然按当前这一场算（买菜是给现在买的）',
+    nowSum.ingredientStats.total > 0 && oldSum.ingredientStats.total === nowSum.ingredientStats.total,
+    JSON.stringify({ 回看: oldSum.ingredientStats.total, 当前: nowSum.ingredientStats.total }));
+  expect('回看历史场次：场次列表照旧带全（好让人接着切）',
+    oldSum.sessions.length === nowSum.sessions.length && oldSum.sessions[0].no === 2,
+    JSON.stringify(oldSum.sessions.map((s) => s.no + ':' + s.name)));
+  // 点赞时没填名字（存的是占位「匿名朋友」）、点单时填了名字的人：
+  // 主人端必须看到他点单时那个名字，不能既叫「老客人」又叫「匿名朋友」
+  expect('点赞时没填名字的人，用他那一场的点单昵称显示（不显示成匿名朋友）',
+    (nowSum.likes.filter((l) => l.dishId === dishA._id)[0] || { who: [] }).who.map((w) => w.name).indexOf('老客人') >= 0,
+    JSON.stringify(nowSum.likes.map((l) => l.name + ':' + l.who.map((w) => w.name).join('/'))));
+  r = await call('summary', { sessionId: 'party' }, GUEST_C);
+  expect('非管理员回看不了任何一场', r.ok === false && /权限/.test(r.msg), r.msg);
+
+  /* --- 主人催票名单：这一场点过单、但还没投票的人 --- */
+  await call('submitOrder', { nick: '还没投票的小张', partySize: 1, items: [{ dishId: dishB._id, qty: 1 }] }, 'openid_no_vote_yet');
+  r = await call('summary', {}, HOST);
+  expect('看板列出「这一场点过单、还没投票的人」（主人催票用）',
+    (r.data.likeStats.notVoted || []).indexOf('还没投票的小张') >= 0,
+    JSON.stringify(r.data.likeStats.notVoted));
+  expect('投过票的人不会出现在催票名单里（老客人投过）',
+    (r.data.likeStats.notVoted || []).indexOf('老客人') < 0,
+    JSON.stringify(r.data.likeStats.notVoted));
+  await call('cancelOrder', {}, 'openid_no_vote_yet');
+
+  /* --- 开席门槛：新开的一场还没人点单时，谁都不能投票 ---
+     不然主人一建好下一场，朋友点开就能把下一场的票提前投了。 */
+  const cfgRo = state.collections.config.filter((d) => d._id === 'party')[0];
+  const keepSession = {
+    sessionId: cfgRo.sessionId,
+    sessionNo: cfgRo.sessionNo,
+    sessionName: cfgRo.sessionName,
+    sessionStartedAt: cfgRo.sessionStartedAt
+  };
+  cfgRo.sessionId = 's_not_started';
+  cfgRo.sessionNo = 9;
+  cfgRo.sessionName = '还没开席的一场';
+  r = await call('votes', {}, V1);
+  expect('还没开席的那一场：不发候选、canVote=false',
+    r.data.started === false && r.data.canVote === false && r.data.candidates.length === 0,
+    JSON.stringify({ started: r.data.started, canVote: r.data.canVote, n: r.data.candidates.length }));
+  r = await call('submitVotes', { dishIds: [dishB._id] }, V1);
+  expect('还没开席的那一场：投票被拒，并说清为什么',
+    r.ok === false && /还没开席/.test(r.msg), r.msg);
+
+  await call('submitOrder', { nick: '先点菜的人', partySize: 2, items: [{ dishId: dishB._id, qty: 1 }] }, 'openid_first_order');
+  r = await call('votes', {}, V1);
+  expect('有人点单 = 开席：候选回来了', r.data.started === true && r.data.canVote === true && r.data.candidates.length > 0,
+    JSON.stringify({ started: r.data.started, canVote: r.data.canVote, n: r.data.candidates.length }));
+  r = await call('submitVotes', { dishIds: [dishB._id] }, V1);
+  expect('开席之后就能投票了', r.ok === true && r.data.session.no === 9, r.msg + ' ' + JSON.stringify(r.data.session));
+
+  // 收尾：把这一场的票和单都撤掉，再还原当前场次，后面的断言不受影响
+  r = await call('resetVotes', { sessionId: 's_not_started' }, HOST);
+  expect('清空指定场次的点赞：只清那还没开席的一场', r.ok && r.data.cleared === 1, JSON.stringify(r.data));
+  await call('cancelOrder', {}, 'openid_first_order');
+  cfgRo.sessionId = keepSession.sessionId;
+  cfgRo.sessionNo = keepSession.sessionNo;
+  cfgRo.sessionName = keepSession.sessionName;
+  cfgRo.sessionStartedAt = keepSession.sessionStartedAt;
+  r = await call('summary', {}, HOST);
+  expect('还原当前场次后：又是原来的第 2 场',
+    r.data.session.id === keepSession.sessionId && r.data.session.no === 2 && r.data.isCurrent === true,
+    JSON.stringify(r.data.session));
 
   /* --- 主人能看到"这道菜是谁赞的" --- */
   // 注意用 dishA/dishB（刚查出来的、确实还在菜库里的菜）：

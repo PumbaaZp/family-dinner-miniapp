@@ -5,14 +5,31 @@
     <view class="hero-title">后厨看板</view>
     <view class="hero-sub">更新于 {{updatedAt}} · {{closed ? '已截止，15 秒刷新一次' : '每 2 秒自动刷新'}}</view>
     <view class="hero-meta">
-      <view class="hero-chip" wx:if="{{sessionText}}">🎊 {{sessionText}}</view>
+      <view class="hero-chip" wx:if="{{sessionText}}">{{isCurrentView ? '🎊' : '📜'}} {{sessionText}}{{isCurrentView ? '' : '（历史 · 只看不改）'}}</view>
       <view class="hero-chip">{{closed ? '⏰ 已截止' : '🕒 截止 ' + deadlineText}}</view>
     </view>
-    <view class="hero-links">
+    <view class="hero-links" wx:if="{{isCurrentView}}">
       <text class="hero-link" bindtap="onRenameSession">✎ 改这一场的名字 ›</text>
       <text class="hero-link" bindtap="onNewSession">开始新的一场家宴 ›</text>
     </view>
+    <view class="hero-links" wx:else>
+      <text class="hero-link" bindtap="onBackToCurrent">← 回到当前这一场 ›</text>
+    </view>
   </view>
+
+  <!-- 场次切换：默认当前这一场，点一下就能回看以前某一场 -->
+  <scroll-view class="sess-bar" scroll-x wx:if="{{sessions.length > 1}}">
+    <view
+      class="sess {{item.active ? 'sess-on' : ''}}"
+      wx:for="{{sessions}}"
+      wx:key="sessionId"
+      data-id="{{item.sessionId}}"
+      bindtap="onPickSession"
+    >
+      <text>{{item.name}}（第 {{item.no}} 场）</text>
+      <text class="sess-mark" wx:if="{{item.current}}">进行中</text>
+    </view>
+  </scroll-view>
 
   <!-- 统计 -->
   <view class="stats">
@@ -41,7 +58,8 @@
       <text class="muted">{{dishTotals.length}} 种</text>
     </view>
 
-    <view class="hint">不做的菜点右侧「不做」：会从所有人的订单里去掉它，并自动下架。</view>
+    <view class="hint" wx:if="{{isCurrentView}}">不做的菜点右侧「不做」：会从所有人的订单里去掉它，并自动下架。</view>
+    <view class="hint" wx:else>这是「{{sessionText}}」的历史记录，只看不改；要改请先回到当前这一场。</view>
 
     <view class="dt" wx:for="{{dishTotals}}" wx:key="dishId">
       <text class="dt-emoji">{{item.emoji}}</text>
@@ -55,7 +73,7 @@
         <view class="dt-note" wx:for="{{item.notes}}" wx:for-item="n" wx:key="*this">↳ {{n}}</view>
       </view>
       <view class="dt-qty">×{{item.qty}}</view>
-      <view class="dt-drop" catchtap="onDropDish" data-id="{{item.dishId}}" data-name="{{item.name}}">不做</view>
+      <view class="dt-drop" wx:if="{{isCurrentView}}" catchtap="onDropDish" data-id="{{item.dishId}}" data-name="{{item.name}}">不做</view>
     </view>
 
     <view class="empty" wx:if="{{!loading && !dishTotals.length}}">
@@ -75,7 +93,8 @@
       ⚠️ 汇总里包含<span class="strong">你自己</span>的点单。如果那只是自测，去「我的点单」点一下「撤销」——否则人数和份数会偏多。
     </view>
 
-    <view class="hint">点份数可以改成精确值，「−」减一份，「✕」整条去掉。</view>
+    <view class="hint" wx:if="{{isCurrentView}}">点份数可以改成精确值，「−」减一份，「✕」整条去掉。</view>
+    <view class="hint" wx:else>历史场次只看不改。</view>
 
     <view class="op" wx:for="{{orders}}" wx:key="key">
       <view class="op-head">
@@ -91,7 +110,7 @@
           <text class="op-item-name">{{i.emoji}} {{i.name}}</text>
           <text class="op-item-note" wx:if="{{i.note}}">{{i.note}}</text>
         </view>
-        <view class="op-item-ops">
+        <view class="op-item-ops" wx:if="{{isCurrentView}}">
           <text
             class="op-qty-btn"
             catchtap="onEditItemQty"
@@ -138,7 +157,7 @@
     </view>
 
     <block wx:if="{{likes.length}}">
-      <view class="hint">本场（{{sessionText}}）：一人最多 3 道，重复提交会覆盖。名字就是他点单时用的称呼。</view>
+      <view class="hint">{{isCurrentView ? '本场' : '这一场'}}（{{sessionText}}）：一人最多 3 道，名字就是他点单时用的称呼。</view>
       <view class="lk" wx:for="{{likes}}" wx:key="key">
         <text class="lk-rank">{{item.medal || item.rank}}</text>
         <text class="lk-emoji">{{item.emoji}}</text>
@@ -151,8 +170,9 @@
           <view class="lk-who" wx:if="{{item.whoText}}">{{item.whoText}}</view>
         </view>
       </view>
+      <view class="lk-miss" wx:if="{{likeStats.notVotedText}}">还没投的：{{likeStats.notVotedText}}</view>
     </block>
-    <view class="hint" wx:else>本场还没人点赞。把小程序发群里，让朋友吃完来投一票。</view>
+    <view class="hint" wx:else>{{isCurrentView ? '本场还没人点赞。把小程序发群里，让朋友吃完来投一票。' : '这一场没有人点赞。'}}</view>
 
     <!-- 累计榜：同一个人来过三场、场场都给这道菜点赞，就算 3 票 -->
     <view class="hr"></view>
@@ -197,8 +217,15 @@
     </view>
   </view>
 
-  <!-- 食材采购 -->
-  <view class="card" wx:if="{{ingredientStats.total}}">
+  <!-- 食材采购：永远按当前这一场算（买菜是给"现在"买的） -->
+  <view class="card" wx:if="{{!isCurrentView}}">
+    <view class="card-title">食材采购</view>
+    <view class="muted">你在看历史场次，所以这块不显示——食材采购永远按「当前这一场」算。</view>
+    <view class="actions" style="margin-top:20rpx">
+      <view class="btn btn-ghost" bindtap="onBackToCurrent">回到当前这一场</view>
+    </view>
+  </view>
+  <view class="card" wx:elif="{{ingredientStats.total}}">
     <view class="card-title">
       <text>食材采购</text>
       <text class="muted">还要买 {{ingredientStats.missing}} / {{ingredientStats.total}}</text>
