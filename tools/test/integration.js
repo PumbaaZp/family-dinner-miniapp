@@ -1077,6 +1077,33 @@ async function runBackend() {
   r = await call('mergeCategory', { to: '其他' }, HOST);
   expect('没说要整理哪个分类 → 明确提示', r.ok === false && /缺少/.test(r.msg), r.msg);
   for (const id of tidies) await call('removeDish', { id: id }, HOST);
+
+  /* 「快手菜」也去掉了：这套归类建议得跟内置菜库的新口径一致。
+     这几道是原来快手菜里的典型（蛋类 / 罐头肉 / 主食 / 甜点），
+     另外带上「可乐鸡翅」「糖醋排骨」验证"先判是什么、再判怎么做"的先后顺序。 */
+  const quickIds = [];
+  for (const n of ['番茄炒蛋', '午餐肉煎蛋', '香肠蒸饭', '冰豆花', '可乐鸡翅', '糖醋排骨']) {
+    const add = await call('addDish', { name: '归类用' + n, category: '快手菜', available: false }, HOST);
+    quickIds.push(add.data._id);
+  }
+  r = await call('mergeCategory', { from: '快手菜', dryRun: true }, HOST);
+  const quickPlan = {};
+  (r.data.plan || []).forEach((p) => {
+    quickPlan[p.name.replace('归类用', '')] = p.to;
+  });
+  expect('归类建议跟内置菜库的新口径一致（原来快手菜里的 9 道都拆进了具体分类）',
+    quickPlan['番茄炒蛋'] === '蔬菜' && quickPlan['午餐肉煎蛋'] === '猪肉' &&
+      quickPlan['香肠蒸饭'] === '主食' && quickPlan['冰豆花'] === '甜品',
+    JSON.stringify(quickPlan));
+  expect('先判"是什么"再判"怎么做"：可乐鸡翅→鸡肉、糖醋排骨→猪肉',
+    quickPlan['可乐鸡翅'] === '鸡肉' && quickPlan['糖醋排骨'] === '猪肉', JSON.stringify(quickPlan));
+  r = await call('mergeCategory', { from: '快手菜' }, HOST);
+  expect('一键把「快手菜」也挪走', r.ok && r.data.moved === 6, JSON.stringify(r.data.byTo));
+  const afterQuick = (await call('listDishes', { all: true }, HOST)).data.dishes;
+  expect('挪完之后再也没有「快手菜」这个分类',
+    afterQuick.filter((d) => d.category === '快手菜').length === 0,
+    JSON.stringify(afterQuick.filter((d) => quickIds.indexOf(d._id) >= 0).map((d) => d.name + ':' + d.category)));
+  for (const id of quickIds) await call('removeDish', { id: id }, HOST);
   await call('removeDish', { id: customId }, HOST);
 }
 

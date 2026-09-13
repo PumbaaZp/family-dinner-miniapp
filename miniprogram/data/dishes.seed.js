@@ -5,7 +5,8 @@
  *
  * 字段说明：
  *   category  决定朋友端点菜页的分类标签顺序（按 sort 升序出现）
- *   limit     非 null 时是**全场总份数上限**（服务端强校验），用于一锅只出一份的菜
+ *   limit     非 null 时是**每个客人对这道菜最多点几份**（服务端强校验），用于一锅只出一份的菜。
+ *             注意不是"全桌加起来的上限"：一桌人各点各的，实际做一份，分量由主人定。
  *   available 默认全部 false：菜库是"能做什么"，上架才是"今晚做什么"。
  *             导入后要去「家宴设置与菜库」勾选今晚的菜（整组切换可以一次开一类）。
  *   sort      每类之间留 100 的间隔，方便以后在中间插菜
@@ -20,6 +21,8 @@ module.exports = [
   { name: '黄豆炖猪蹄', category: '猪肉', desc: '黄豆提前泡发，炖到脱骨', emoji: '🍲', limit: null, tags: ['硬菜', '汤', '猪肉'], ingredients: ['猪蹄', '黄豆', '生姜', '小葱'], sort: 60, available: false },
   { name: '红烧蹄髈', category: '猪肉', desc: '整只慢炖两小时，皮糯肉酥', emoji: '🍖', limit: 1, tags: ['硬菜', '猪肉'], ingredients: ['蹄髈', '冰糖', '生抽', '老抽', '生姜', '小葱'], sort: 70, available: false },
   { name: '萝卜炖猪蹄', category: '猪肉', desc: '白萝卜吸饱肉汤，比肉还抢手', emoji: '🍲', limit: null, tags: ['汤', '猪肉', '暖胃'], ingredients: ['猪蹄', '白萝卜', '生姜', '小葱'], sort: 80, available: false },
+  { name: '午餐肉煎蛋', category: '猪肉', desc: '罐头午餐肉切片煎香，配个煎蛋', emoji: '🥓', limit: null, tags: ['快手', '下饭'], ingredients: ['午餐肉', '鸡蛋'], sort: 90, available: false },
+  { name: '榨菜肉丝', category: '猪肉', desc: '榨菜丝和肉丝快炒，咸鲜下饭', emoji: '🥬', limit: null, tags: ['快手', '下饭'], ingredients: ['榨菜', '瘦肉', '小葱'], sort: 100, available: false },
 
   /* ---------------- 鸡肉 ---------------- */
   { name: '鸡汤', category: '鸡肉', desc: '老母鸡慢炖，只放姜和盐', emoji: '🍲', limit: null, tags: ['汤', '鸡肉', '暖胃'], ingredients: ['老母鸡', '生姜', '小葱', '枸杞'], sort: 110, available: false },
@@ -44,6 +47,9 @@ module.exports = [
   { name: '手撕包菜', category: '蔬菜', desc: '手撕比刀切入味，干辣椒炝锅', emoji: '🥬', limit: null, tags: ['素', '下饭', '微辣'], ingredients: ['包菜', '干辣椒', '大蒜'], sort: 300, available: false },
   { name: '清炒冬瓜', category: '蔬菜', desc: '切片快炒，清淡解腻', emoji: '🍈', limit: null, tags: ['素', '清淡', '解腻'], ingredients: ['冬瓜', '大蒜'], sort: 310, available: false },
   { name: '油麦菜', category: '蔬菜', desc: '大火快炒，蒜香脆嫩不出水', emoji: '🥬', limit: null, tags: ['素', '快手', '清淡'], ingredients: ['油麦菜', '大蒜'], sort: 320, available: false },
+  { name: '番茄炒蛋', category: '蔬菜', desc: '十分钟上桌，酸甜下饭不翻车', emoji: '🍅', limit: null, tags: ['快手', '素', '下饭'], ingredients: ['番茄', '鸡蛋', '小葱'], sort: 330, available: false },
+  { name: '葱花炒蛋', category: '蔬菜', desc: '蛋液打散，炒到刚凝固就起锅', emoji: '🍳', limit: null, tags: ['快手', '素'], ingredients: ['鸡蛋', '小葱'], sort: 340, available: false },
+  { name: '家常豆腐', category: '蔬菜', desc: '嫩豆腐切块，酱油糖烧入味', emoji: '🍲', limit: null, tags: ['快手', '素', '下饭'], ingredients: ['嫩豆腐', '生抽', '老抽', '小葱', '大蒜'], sort: 350, available: false },
 
   /* ---------------- 贝蟹虾 ---------------- */
   { name: '盐水河虾', category: '贝蟹虾', desc: '只放姜葱和盐，吃的就是那口鲜', emoji: '🦐', limit: null, tags: ['海鲜', '清淡', '硬菜'], ingredients: ['河虾', '生姜', '小葱'], sort: 410, available: false },
@@ -70,6 +76,10 @@ module.exports = [
   { name: '蒜蓉粉丝', category: '主食', desc: '粉丝垫底，蒜蓉蒸到入味', emoji: '🍜', limit: null, tags: ['主食', '清淡'], ingredients: ['粉丝', '大蒜', '蒸鱼豉油', '小葱'], sort: 630, available: false },
   { name: '炒饭', category: '主食', desc: '隔夜饭炒到颗颗分开', emoji: '🍚', limit: null, tags: ['主食'], ingredients: ['大米', '鸡蛋', '小葱'], sort: 640, available: false },
   { name: '小米南瓜粥', category: '主食', desc: '小米熬到开花，南瓜化在粥里，暖胃', emoji: '🥣', limit: null, tags: ['主食', '暖胃'], ingredients: ['小米', '南瓜'], sort: 650, available: false },
+  { name: '香肠蒸饭', category: '主食', desc: '广式香肠切片铺饭上同蒸', emoji: '🍚', limit: null, tags: ['快手', '主食'], ingredients: ['香肠', '大米'], sort: 660, available: false },
+  { name: '清汤挂面', category: '主食', desc: '一把挂面加青菜和蛋，五分钟', emoji: '🍜', limit: null, tags: ['快手', '主食'], ingredients: ['挂面', '青菜', '鸡蛋'], sort: 670, available: false },
+  { name: '速冻水饺', category: '主食', desc: '冰箱常备，煮开即食', emoji: '🥟', limit: null, tags: ['快手', '主食'], ingredients: ['速冻水饺'], sort: 680, available: false },
+  { name: '泡面加蛋', category: '主食', desc: '真到山穷水尽时的最后一道防线', emoji: '🍜', limit: null, tags: ['快手', '主食'], ingredients: ['泡面', '鸡蛋'], sort: 690, available: false },
 
   /* ---------------- 汤羹 ---------------- */
   { name: '南瓜羹', category: '汤羹', desc: '蒸软打泥，加一点淡奶油更滑', emoji: '🎃', limit: null, tags: ['汤', '甜', '暖胃'], ingredients: ['南瓜', '淡奶油'], sort: 710, available: false },
@@ -88,15 +98,14 @@ module.exports = [
   { name: '米酒', category: '饮品', desc: '自家酿的，微甜顺口', emoji: '🍶', limit: null, tags: ['酒搭', '甜'], ingredients: ['米酒'], sort: 940, available: false },
   { name: '啤酒', category: '饮品', desc: '冰啤酒配硬菜', emoji: '🍺', limit: null, tags: ['酒搭'], ingredients: ['啤酒'], sort: 950, available: false },
   { name: '葡萄酒', category: '饮品', desc: '开一瓶配红肉', emoji: '🍷', limit: null, tags: ['酒搭'], ingredients: ['葡萄酒'], sort: 960, available: false },
-
-  /* ---------------- 快手菜（应急加菜：冰箱常备，十分钟上桌） ---------------- */
-  { name: '番茄炒蛋', category: '快手菜', desc: '十分钟上桌，酸甜下饭不翻车', emoji: '🍅', limit: null, tags: ['快手', '素', '下饭'], ingredients: ['番茄', '鸡蛋', '小葱'], sort: 1010, available: false },
-  { name: '葱花炒蛋', category: '快手菜', desc: '蛋液打散，炒到刚凝固就起锅', emoji: '🍳', limit: null, tags: ['快手', '素'], ingredients: ['鸡蛋', '小葱'], sort: 1020, available: false },
-  { name: '午餐肉煎蛋', category: '快手菜', desc: '罐头午餐肉切片煎香，配个煎蛋', emoji: '🥓', limit: null, tags: ['快手', '下饭'], ingredients: ['午餐肉', '鸡蛋'], sort: 1030, available: false },
-  { name: '香肠蒸饭', category: '快手菜', desc: '广式香肠切片铺饭上同蒸', emoji: '🍚', limit: null, tags: ['快手', '主食'], ingredients: ['香肠', '大米'], sort: 1040, available: false },
-  { name: '家常豆腐', category: '快手菜', desc: '嫩豆腐切块，酱油糖烧入味', emoji: '🍲', limit: null, tags: ['快手', '素', '下饭'], ingredients: ['嫩豆腐', '生抽', '老抽', '小葱', '大蒜'], sort: 1050, available: false },
-  { name: '清汤挂面', category: '快手菜', desc: '一把挂面加青菜和蛋，五分钟', emoji: '🍜', limit: null, tags: ['快手', '主食'], ingredients: ['挂面', '青菜', '鸡蛋'], sort: 1060, available: false },
-  { name: '速冻水饺', category: '快手菜', desc: '冰箱常备，煮开即食', emoji: '🥟', limit: null, tags: ['快手', '主食'], ingredients: ['速冻水饺'], sort: 1070, available: false },
-  { name: '榨菜肉丝', category: '快手菜', desc: '榨菜丝和肉丝快炒，咸鲜下饭', emoji: '🥬', limit: null, tags: ['快手', '下饭'], ingredients: ['榨菜', '瘦肉', '小葱'], sort: 1080, available: false },
-  { name: '泡面加蛋', category: '快手菜', desc: '真到山穷水尽时的最后一道防线', emoji: '🍜', limit: null, tags: ['快手', '主食'], ingredients: ['泡面', '鸡蛋'], sort: 1090, available: false }
+  /* ---------------- 快手菜（已并入上面的具体分类） ----------------
+     原先有一个独立的「快手菜」分类，装的是冰箱常备、十分钟上桌的应急菜。
+     主人明确要求去掉它：它跟"是什么"（猪肉 / 蔬菜 / 主食…）是另一个维度，
+     点菜时既猜不到菜在哪一类，也跟别的分类重复。
+     所以按**主料/形态**把它们拆进了上面的分类：
+       番茄炒蛋 / 葱花炒蛋 / 家常豆腐 → 蔬菜
+       午餐肉煎蛋 / 榨菜肉丝        → 猪肉
+       香肠蒸饭 / 清汤挂面 / 速冻水饺 / 泡面加蛋 → 主食
+     "快手"这个信息没丢，仍在 tags 里（挑菜时照样看得到）。
+     线上库里还叫「快手菜」的菜，用「家宴设置与菜库 → 分类整理」一键挪走。 */
 ];
