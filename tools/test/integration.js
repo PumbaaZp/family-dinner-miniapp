@@ -816,6 +816,14 @@ async function runBackend() {
   expect('还没开席的那一场：不发候选、canVote=false',
     r.data.started === false && r.data.canVote === false && r.data.candidates.length === 0,
     JSON.stringify({ started: r.data.started, canVote: r.data.canVote, n: r.data.candidates.length }));
+  // 「看不到点赞数」的排查锚点：菜名后面的 👍N 用的是**跨场次累计**，
+  // 它跟"这一场开没开席"完全无关 —— 没开席也要照常返回，否则朋友挑菜时就少了一份参考。
+  expect('没开席时「跨场次累计」照旧返回（菜名后面的 👍N 跟开不开席无关）',
+    Object.keys(r.data.likeMapAll || {}).length > 0 && Object.keys(r.data.likeMap || {}).length === 0,
+    JSON.stringify({ 累计: r.data.likeMapAll, 本场: r.data.likeMap }));
+  expect('没开席时本场票数为 0（那是"这一场还没人投票"，不是数据丢了）',
+    r.data.totals.length === 0 && r.data.voterCount === 0 && r.data.voterCountAll > 0,
+    JSON.stringify({ 本场: r.data.voterCount, 累计人次: r.data.voterCountAll }));
   r = await call('submitVotes', { dishIds: [dishB._id] }, V1);
   expect('还没开席的那一场：投票被拒，并说清为什么',
     r.ok === false && /还没开席/.test(r.msg), r.msg);
