@@ -143,3 +143,12 @@
   text-align: center;
   line-height: 1.6;
 }
+
+/* 致谢：比小提示再淡一点，别抢戏 */
+.thanks {
+  margin: 20rpx 0 40rpx;
+  font-size: 22rpx;
+  color: #b3a79e;
+  text-align: center;
+  line-height: 1.7;
+}

@@ -113,4 +113,5 @@
   </block>
 
   <view class="tips">小提示：把小程序分享到群里，朋友点开就能看到菜单并点单。</view>
+  <view class="thanks">🙏 本小程序感谢各位来参加家宴的亲朋好友提供测试建议</view>
 </view>

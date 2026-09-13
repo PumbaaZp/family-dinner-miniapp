@@ -21,7 +21,7 @@
 {"name":"清炒青菜","category":"蔬菜","desc":"断生就出锅，保持翠绿脆嫩","emoji":"🥬","limit":null,"tags":["素","清淡"],"ingredients":["青菜","大蒜"],"sort":230,"available":false}
 {"name":"醋溜土豆丝","category":"蔬菜","desc":"切细丝泡去淀粉，酸辣脆爽","emoji":"🥔","limit":null,"tags":["素","下饭","微辣"],"ingredients":["土豆","干辣椒","香醋","大蒜"],"sort":240,"available":false}
 {"name":"醋溜白菜","category":"蔬菜","desc":"菜帮斜刀切片，醋香扑鼻","emoji":"🥬","limit":null,"tags":["素","下饭","清淡"],"ingredients":["白菜","香醋","大蒜"],"sort":250,"available":false}
-{"name":"干煸四季豆","category":"蔬菜","desc":"煸到起皱，肉末蒜末一起炒","emoji":"🫘","limit":null,"tags":["素","下饭"],"ingredients":["四季豆","肉末","大蒜","干辣椒"],"sort":260,"available":false}
+{"name":"干煸四季豆","category":"蔬菜","desc":"煸到起皱，肉末蒜末一起炒","emoji":"🫛","limit":null,"tags":["素","下饭"],"ingredients":["四季豆","肉末","大蒜","干辣椒"],"sort":260,"available":false}
 {"name":"油焖茭白","category":"蔬菜","desc":"滚刀块下锅，酱油糖焖到入味","emoji":"🌿","limit":null,"tags":["素","清淡"],"ingredients":["茭白","生抽","老抽","冰糖"],"sort":270,"available":false}
 {"name":"鱼香茄子","category":"蔬菜","desc":"先煎后烧，酸甜微辣挂汁","emoji":"🍆","limit":null,"tags":["素","下饭","微辣"],"ingredients":["茄子","肉末","泡椒","大蒜","生姜","香醋"],"sort":280,"available":false}
 {"name":"凉拌黄瓜","category":"蔬菜","desc":"拍碎更入味，蒜末香醋一拌","emoji":"🥒","limit":null,"tags":["素","解腻","清淡"],"ingredients":["黄瓜","大蒜","香醋"],"sort":290,"available":false}

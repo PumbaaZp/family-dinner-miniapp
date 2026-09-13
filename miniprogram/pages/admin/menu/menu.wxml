@@ -132,6 +132,9 @@
       <view class="btn btn-ghost" bindtap="goPantry">🧺 管理库存</view>
       <view class="btn btn-ghost" bindtap="onTidyCategories">🗂 分类整理</view>
     </view>
+    <view class="actions" style="margin-top:16rpx">
+      <view class="btn btn-ghost" bindtap="onOneTimeFix">🧹 一次性整理（老分类 + 图标）</view>
+    </view>
 
     <!-- 分类整理：把「热菜」这种太宽泛（跟别的分类重复）的分类收拾掉 -->
     <view class="tidy" wx:if="{{tidyOpen}}">

@@ -588,6 +588,16 @@
   text-align: center;
 }
 
+/* 致谢：比小提示再淡一点，别抢戏 */
+.thanks {
+  margin: 24rpx 0 8rpx;
+  padding: 16rpx 12rpx;
+  font-size: 22rpx;
+  color: #b3a79e;
+  line-height: 1.7;
+  text-align: center;
+}
+
 /* 弹窗 */
 .mask {
   position: fixed;

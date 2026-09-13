@@ -218,6 +218,11 @@
   <view class="tips" wx:if="{{inited && dishes.length}}">
     小提示：左右滑动分类快速找菜；点「+」加菜，加了以后可以写口味备注。
   </view>
+
+  <!-- 致谢：朋友看得见的地方留一句 -->
+  <view class="thanks" wx:if="{{inited}}">
+    🙏 本小程序感谢各位来参加家宴的亲朋好友提供测试建议
+  </view>
 </view>
 
 <!-- 底部提交条 -->

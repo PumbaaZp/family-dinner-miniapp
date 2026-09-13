@@ -5,6 +5,19 @@ const SEED = require('../../../data/dishes.seed.js');
 
 const app = getApp();
 
+/**
+ * 已经废弃的宽泛分类：它们按"做起来快不快 / 上菜顺序"分，不按"是什么"（主料/形态）分，
+ * 跟猪肉/蔬菜/主食是两回事，点菜时既猜不到菜在哪一类，又会跟别的分类重复。
+ * 留着这个名单只为「一次性整理」能把线上库里残留的它们挪走。
+ */
+const RETIRED_CATEGORIES = ['热菜', '快手菜'];
+
+/**
+ * 内置菜库里**换过图标**的菜：线上库还挂着老图标的话，「一次性整理」会同步一次。
+ * 只认这个白名单 —— 你自己用 ✎ 改过的图标绝不动。
+ */
+const SEED_ICON_SYNC = ['干煸四季豆'];
+
 Page({
   data: {
     loading: true,
@@ -259,6 +272,74 @@ Page({
 
   onTidyCancel() {
     this.setData({ tidyOpen: false, tidyPlan: '' });
+  },
+
+  /**
+   * 一键「一次性整理」：把已经废弃的宽泛分类挪走 + 同步内置菜库里改过的图标
+   *
+   * 为什么要做成一个按钮：主人不想一道道收拾。
+   *   - 分类：`热菜` / `快手菜` 这两个都不按"是什么"分，已经废弃。
+   *     这里直接调 `mergeCategory`（按菜名自动归类）把它们挪进具体分类，
+   *     跟手动点「分类整理」走的是同一套服务端逻辑，只是不用选来选去。
+   *   - 图标：内置菜库里改过图标的菜（见 SEED_ICON_SYNC），线上库如果还是老图标就同步一次。
+   *     只动这个白名单里的菜，绝不覆盖你自己用 ✎ 改过的图标。
+   *
+   * 幂等：再点一次基本就是"没有需要整理的"。
+   */
+  async onOneTimeFix() {
+    const cats = this.catStats();
+    const retired = RETIRED_CATEGORIES.filter((c) => cats.some((x) => x.name === c));
+    const icons = this.iconFixes();
+    if (!retired.length && !icons.length) {
+      return api.toast('没有需要整理的了（老分类和图标都是最新的）');
+    }
+
+    const lines = [];
+    if (retired.length) lines.push('· 把「' + retired.join('」「') + '」下的菜按菜名归类到猪肉/蔬菜/主食等具体分类');
+    icons.forEach((f) => lines.push('· 改图标：' + f.name + ' ' + f.from + ' → ' + f.to));
+    const ok = await api.confirm('一次性整理（只改分类和图标，不动菜名/食材/上架状态）：\n\n' + lines.join('\n'));
+    if (!ok) return;
+
+    api.loading('整理中');
+    try {
+      let moved = 0;
+      const left = [];
+      for (const from of retired) {
+        const res = await api.call('mergeCategory', { from: from });
+        moved += Number(res.moved) || 0;
+        (res.unmapped || []).forEach((n) => left.push(n));
+      }
+      for (const f of icons) {
+        await api.call('updateDish', { id: f.id, patch: { emoji: f.to } });
+      }
+      api.hideLoading();
+      await this.load();
+      const parts = [];
+      if (moved) parts.push('挪了 ' + moved + ' 道菜');
+      if (icons.length) parts.push('改了 ' + icons.length + ' 个图标');
+      if (left.length) parts.push('有 ' + left.length + ' 道没建议出来（用「分类整理」手动选个分类）：' + left.join('、'));
+      api.toast(parts.length ? '整理好了：' + parts.join('；') : '没有需要整理的');
+    } catch (err) {
+      api.hideLoading();
+      api.toastErr(err);
+    }
+  },
+
+  /** 线上库 vs 内置菜库：哪些菜的图标该同步（只认白名单，不动你自己改过的图标） */
+  iconFixes() {
+    const byName = {};
+    (this.all || []).forEach((d) => {
+      byName[d.name] = d;
+    });
+    const out = [];
+    SEED_ICON_SYNC.forEach((name) => {
+      const mine = SEED.filter((s) => s.name === name)[0];
+      const db = byName[name];
+      if (mine && db && db.emoji !== mine.emoji) {
+        out.push({ id: db._id, name: name, from: db.emoji || '（空）', to: mine.emoji });
+      }
+    });
+    return out;
   },
 
   /** 真的动数据：整理完刷新菜库 */

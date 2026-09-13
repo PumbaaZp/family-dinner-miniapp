@@ -1104,6 +1104,11 @@ async function runBackend() {
     afterQuick.filter((d) => d.category === '快手菜').length === 0,
     JSON.stringify(afterQuick.filter((d) => quickIds.indexOf(d._id) >= 0).map((d) => d.name + ':' + d.category)));
   for (const id of quickIds) await call('removeDish', { id: id }, HOST);
+
+  /* 干煸四季豆的图标：原来那个 🫘 画的是红豆，跟四季豆不像，换成豆荚 */
+  const seedBean = SEED.filter((d) => d.name === '干煸四季豆')[0];
+  expect('内置菜库里干煸四季豆的图标换成了豆荚 🫛（不再是红豆 🫘）',
+    seedBean && seedBean.emoji === '🫛', JSON.stringify(seedBean && seedBean.emoji));
   await call('removeDish', { id: customId }, HOST);
 }
 
@@ -1261,7 +1266,7 @@ async function loadPages() {
   const expectMethods = {
     index: ['bootstrap', 'buildShown', 'buildCats', 'topLiked', 'dishRow', 'spyCat', 'measureSections', 'onPageScroll', 'onPlus', 'onMinus', 'onNote', 'onSubmit', 'onClearCart', 'reloadMenu', 'onInitAsHost', 'goMenu', 'goDashboard', 'onHide', 'onUnload', 'startDeadlineTick', 'stopDeadlineTick', 'onToggleBoard', 'loadBoard', 'mapBoard', 'onToggleLike', 'loadVotes', 'buildVoteList', 'onTapVote', 'saveVotes', 'bumpLike', 'refreshVoteCounts', 'onClearVotes', 'loadDinners', 'mapDinners', 'onPickSession', 'onRetry'],
     mine: ['refresh', 'applyOrder', 'onCancel', 'onCopy', 'onBecomeAdmin'],
-    menu: ['load', 'buildGroups', 'onToggleDish', 'onToggleCategory', 'batchAll', 'onLimitEdit', 'onImportSeed', 'onFillIngredients', 'onSaveSettings', 'onClearDeadline', 'onToggleDeadline', 'goPantry', 'onShowCoverage', 'catStats', 'onTidyCategories', 'onTidyFromChange', 'onTidyToChange', 'previewTidy', 'onTidyCancel', 'onTidyConfirm', 'onEditDish', 'onEditInput', 'onEditCatChange', 'onCancelEdit', 'onSaveDish'],
+    menu: ['load', 'buildGroups', 'onToggleDish', 'onToggleCategory', 'batchAll', 'onLimitEdit', 'onImportSeed', 'onFillIngredients', 'onSaveSettings', 'onClearDeadline', 'onToggleDeadline', 'goPantry', 'onShowCoverage', 'catStats', 'onTidyCategories', 'onTidyFromChange', 'onTidyToChange', 'previewTidy', 'onTidyCancel', 'onTidyConfirm', 'iconFixes', 'onOneTimeFix', 'onEditDish', 'onEditInput', 'onEditCatChange', 'onCancelEdit', 'onSaveDish'],
     pantry: ['load', 'render', 'putItem', 'onFormInput', 'onCatChange', 'onPickItem', 'onCancelEdit', 'onAdd', 'onRemove', 'onClearAll', 'onToggleQuick', 'onChipFilter', 'onToggleChip', 'onToggleBulk', 'onBulkInput', 'onBulkAdd', 'onRefresh'],
     dashboard: ['load', 'mapOrders', 'mapIngredients', 'mapLikes', 'groupByCat', 'buildMenuText', 'buildDishIngredientText', 'buildShoppingText', 'copyText', 'onCopyMenu', 'onCopyDishIngredient', 'onCopyShopping', 'onToggleIngredient', 'onResetShopping', 'onResetVotes', 'onRenameSession', 'onNewSession', 'previewText', 'onRefresh', 'onShow', 'onHide', 'onUnload', 'startAutoRefresh', 'scheduleRefresh', 'stopAutoRefresh', 'onDropDish', 'onDropOrderItem', 'dropDish', 'onDecItem', 'onEditItemQty', 'setItemQty']
   };
@@ -1870,6 +1875,74 @@ async function loadPages() {
       loaded.index.dishRow.call(rowCtx({ d1: 2 }, { d1: 5 }), { _id: 'd1', name: '红烧肉' }).likeText === '👍 5 人赞 · 本场 2' &&
         loaded.index.dishRow.call(rowCtx({ d1: 5 }, { d1: 5 }), { _id: 'd1', name: '红烧肉' }).likeText === '👍 5 人赞',
       '本场 2 票时补「· 本场 2」，全部票都在本场时不重复写');
+
+    /* ---- 「一次性整理」：老分类 + 图标，一键搞定 ---- */
+    if (loaded.menu) {
+      const fixApi = require(path.join(ROOT, 'miniprogram', 'utils', 'api.js'));
+      const realFixConfirm = fixApi.confirm;
+      const realFixCall = fixApi.call;
+      try {
+        const calls = [];
+        fixApi.confirm = () => Promise.resolve(true);
+        fixApi.call = (action, data) => {
+          calls.push({ action: action, data: data });
+          if (action === 'mergeCategory') return Promise.resolve({ moved: data.from === '快手菜' ? 9 : 0, unmapped: [] });
+          return Promise.resolve({ ok: true });
+        };
+        const fixCtx = {
+          // 线上库：还有「快手菜」，干煸四季豆还是老图标；另外有一道自己改过图标的菜（不该被碰）
+          all: [
+            { _id: 'q1', name: '番茄炒蛋', category: '快手菜', emoji: '🍅', available: true },
+            { _id: 'q2', name: '香肠蒸饭', category: '快手菜', emoji: '🍚', available: true },
+            { _id: 'h1', name: '白灼虾', category: '热菜', emoji: '🦐', available: true },
+            { _id: 'b1', name: '干煸四季豆', category: '蔬菜', emoji: '🫘', available: true },
+            { _id: 'b2', name: '红烧肉', category: '猪肉', emoji: '🍖', available: true }
+          ],
+          loadedTimes: 0,
+          setData(d) {
+            Object.assign(this.data, d);
+          },
+          data: {},
+          async load() {
+            this.loadedTimes++;
+          }
+        };
+        fixCtx.catStats = loaded.menu.catStats;
+        fixCtx.iconFixes = loaded.menu.iconFixes;
+        fixCtx.onOneTimeFix = loaded.menu.onOneTimeFix;
+
+        const fixes = fixCtx.iconFixes.call(fixCtx);
+        expect('图标同步只认白名单里那一道（不碰你自己改过的图标）',
+          fixes.length === 1 && fixes[0].id === 'b1' && fixes[0].from === '🫘' && fixes[0].to === '🫛',
+          JSON.stringify(fixes));
+
+        await fixCtx.onOneTimeFix.call(fixCtx);
+        const merged = calls.filter((c) => c.action === 'mergeCategory').map((c) => c.data.from);
+        const iconCall = calls.filter((c) => c.action === 'updateDish')[0];
+        expect('一键整理：老分类（热菜、快手菜）都交给 mergeCategory 自动归类',
+          merged.join(',') === '热菜,快手菜', JSON.stringify(calls.map((c) => c.action + ':' + (c.data.from || c.data.id))));
+        expect('一键整理：图标也一起改了（updateDish 只传 emoji）',
+          !!iconCall && iconCall.data.id === 'b1' && iconCall.data.patch.emoji === '🫛' && Object.keys(iconCall.data.patch).length === 1,
+          JSON.stringify(iconCall && iconCall.data));
+        expect('一键整理完会刷新菜库', fixCtx.loadedTimes === 1, '刷新次数=' + fixCtx.loadedTimes);
+
+        // 已经整理过：再点一次不该再动数据
+        calls.length = 0;
+        const doneCtx = Object.assign({}, fixCtx, {
+          all: [{ _id: 'b1', name: '干煸四季豆', category: '蔬菜', emoji: '🫛', available: true }],
+          loadedTimes: 0
+        });
+        doneCtx.catStats = loaded.menu.catStats;
+        doneCtx.iconFixes = loaded.menu.iconFixes;
+        doneCtx.onOneTimeFix = loaded.menu.onOneTimeFix;
+        await doneCtx.onOneTimeFix();
+        expect('没有需要整理的分类/图标时：一个请求都不发（幂等）',
+          calls.length === 0 && doneCtx.loadedTimes === 0, JSON.stringify(calls));
+      } finally {
+        fixApi.confirm = realFixConfirm;
+        fixApi.call = realFixCall;
+      }
+    }
 
     /* ---- 招牌菜：跨场次点赞前三（虚拟分类，不移动菜品原分类） ---- */
     const topCtx = {
