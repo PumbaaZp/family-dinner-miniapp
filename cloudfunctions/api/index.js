@@ -187,7 +187,13 @@ function sessionOf(cfg) {
   };
 }
 
-/** 全部场次（新的在前）。老配置里没有 sessions 数组时，至少返回当前这一场 */
+/**
+ * 全部场次（新的在前）。
+ *
+ * 当前这一场的名字**以 `config.sessionName` 为准**，sessions 数组里那条只是历史存档：
+ * 这样无论名字是被 renameSession 改的、还是直接在云开发控制台改库改的，
+ * 看板、场次列表、朋友端的场次标签都会是一致的（不会出现"大厅改了、标签还是旧的"）。
+ */
 function sessionListOf(cfg) {
   const cur = sessionOf(cfg);
   const list = (cfg && Array.isArray(cfg.sessions) ? cfg.sessions : []).map((s) => ({
@@ -196,15 +202,20 @@ function sessionListOf(cfg) {
     name: s.name || '第 ' + (Number(s.no) || 0) + ' 场家宴',
     ts: Number(s.ts) || 0
   }));
-  if (!list.some((s) => s.id === cur.id)) {
-    list.push({ id: cur.id, no: cur.no, name: cur.name, ts: cur.ts });
-  }
+
+  const at = list.map((s) => s.id).indexOf(cur.id);
+  if (at >= 0) list[at] = { id: cur.id, no: cur.no, name: cur.name, ts: cur.ts };
+  else list.push({ id: cur.id, no: cur.no, name: cur.name, ts: cur.ts });
+
   return list.sort((a, b) => b.no - a.no || b.ts - a.ts);
 }
 
-/** 某个场次的序号/名字/是不是当前场 */
 function sessionLabel(cfg, sessionId) {
   const cur = sessionOf(cfg);
+  // 当前这一场直接用 config 里的最新值，不看 sessions 数组里的存档
+  if (sessionId === cur.id) {
+    return { sessionId: cur.id, no: cur.no, name: cur.name, ts: cur.ts, current: true };
+  }
   const hit = sessionListOf(cfg).filter((s) => s.id === sessionId)[0];
   const one = hit || { id: sessionId, no: 0, name: '家宴', ts: 0 };
   return {
@@ -212,7 +223,7 @@ function sessionLabel(cfg, sessionId) {
     no: one.no,
     name: one.name,
     ts: one.ts,
-    current: one.id === cur.id
+    current: false
   };
 }
 

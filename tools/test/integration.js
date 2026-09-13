@@ -784,6 +784,25 @@ async function runBackend() {
   r = await call('renameSession', { name: '乱七八糟的名字超过二十个字就会被裁剪掉哦' }, HOST);
   expect('名字超长会被裁剪', r.ok && r.data.session.name.length <= 20, '长度=' + (r.ok ? r.data.session.name.length : '-'));
 
+  /* 有人会直接在云开发控制台改库：只改 config.sessionName，不动 sessions 数组。
+     这种情况下看板、场次列表、朋友端的场次标签必须一起变，不能出现"大厅改了、标签还是旧的"。 */
+  const cfgDoc = state.collections.config.filter((d) => d._id === 'party')[0];
+  cfgDoc.sessionName = '手改的名字';
+  r = await call('summary', {}, HOST);
+  expect('直接改库（只改 sessionName）：看板与场次列表都用最新名字',
+    r.data.session.name === '手改的名字' && r.data.sessions[0].name === '手改的名字',
+    JSON.stringify({ now: r.data.session.name, list: r.data.sessions.map((s) => s.name) }));
+  r = await call('votes', {}, V1);
+  expect('朋友端的场次标签也用最新名字（读的是 config，不是 sessions 存档）',
+    r.data.session.name === '手改的名字' && r.data.current.name === '手改的名字',
+    JSON.stringify(r.data.session));
+  r = await call('myDinners', {}, V1);
+  expect('「我参加过的场次」里当前这一场也是新名字',
+    r.data.dinners[0].name === '手改的名字' && r.data.dinners[0].current === true,
+    JSON.stringify(r.data.dinners.map((d) => d.name)));
+  r = await call('renameSession', { name: '0913场家宴' }, HOST);
+  expect('改回正式名字', r.ok && r.data.session.name === '0913场家宴');
+
   /* --- 编辑菜品：临时加的菜能改分类和内容 --- */
   r = await call('addDish', { name: '今天加的自定义菜', category: '自定义', available: true }, HOST);
   const customId = r.data._id;
