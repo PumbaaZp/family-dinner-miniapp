@@ -28,7 +28,11 @@ Page({
     ingredientStats: { total: 0, missing: 0, purchased: 0, inStock: 0, pantryCount: 0 },
     // 客人的点赞（吃完的反馈，下次菜单的参考）
     likes: [],
-    likeStats: { voters: 0, likedDishes: 0 },
+    likesAll: [],
+    likeStats: { voters: 0, likedDishes: 0, votersAll: 0, likedDishesAll: 0 },
+    // 当前场次（后厨看板只看这一场；历史场次留在点赞榜里做参考）
+    session: null,
+    sessionText: '',
     // 三种导出的文本，load 时生成好，点按钮直接复制
     menuText: '',
     dishIngText: '',
@@ -126,7 +130,10 @@ Page({
         orders,
         hasHostOrder: orders.some((o) => o.isHost),
         likes: this.mapLikes(res.likes),
-        likeStats: res.likeStats || { voters: 0, likedDishes: 0 },
+        likesAll: this.mapLikes(res.likesAll),
+        likeStats: res.likeStats || { voters: 0, likedDishes: 0, votersAll: 0, likedDishesAll: 0 },
+        session: res.session || null,
+        sessionText: res.session ? res.session.name + '（第 ' + res.session.no + ' 场）' : '',
         ingredientStats: res.ingredientStats || { total: 0, missing: 0, purchased: 0, inStock: 0, pantryCount: 0 },
         deadlineText: deadlineTs ? fmt.fmtShort(deadlineTs) + '（' + fmt.countdown(deadlineTs) + '）' : '不限时间',
         closed: !!(deadlineTs && Date.now() > deadlineTs),
@@ -398,17 +405,48 @@ Page({
     }
   },
 
-  /** 清空所有点赞（比如测试时投过、或想重新收集一轮） */
+  /** 清空点赞：默认只清本场（历史场次的票留着当参考） */
   async onResetVotes() {
     const n = this.data.likeStats.voters || 0;
-    const ok = await api.confirm('清空全部点赞？\n\n' + n + ' 个人的投票会被删掉，菜库和订单不受影响。');
+    const name = (this.data.session && this.data.session.name) || '本场';
+    const ok = await api.confirm('清空「' + name + '」的点赞？\n\n' + n + ' 个人的本场投票会被删掉；历史场次的票和累计榜不受影响。');
     if (!ok) return;
     api.loading('处理中');
     try {
-      const res = await api.call('resetVotes');
+      const res = await api.call('resetVotes', { sessionId: this.data.session ? this.data.session.id : '' });
       api.hideLoading();
       await this.load({ silent: true });
-      api.toast('已清空 ' + res.cleared + ' 人的点赞');
+      api.toast('已清空 ' + res.cleared + ' 人的本场点赞');
+    } catch (err) {
+      api.hideLoading();
+      api.toastErr(err);
+    }
+  },
+
+  /**
+   * 开始新的一场家宴
+   *
+   * 上一场的订单和点赞会**原样保留**（朋友还能回去给那一场点赞，累计榜也不会丢），
+   * 只是把「已采购」勾选重置了——那是上一场买菜用的。家里的库存不动。
+   */
+  async onNewSession() {
+    const name = await api.prompt('给这一场起个名字（比如「中秋家宴」）', '开始新的一场家宴', '第 ' + ((this.data.session ? this.data.session.no : 0) + 1) + ' 场家宴');
+    if (name === null) return;
+    api.loading('准备中');
+    try {
+      const res = await api.call('newSession', { name: name });
+      api.hideLoading();
+      await this.load({ silent: true });
+      wx.showModal({
+        title: '新的一场开始了',
+        content:
+          '现在是「' + res.session.name + '」（第 ' + res.session.no + ' 场）。\n\n' +
+          '上一场（' + res.prev.name + '）的订单和点赞都留着，朋友还能回去给那一场点赞。\n' +
+          '「已采购」勾选已重置，家里的库存没动。\n\n' +
+          '接着去「家宴设置与菜库」挑今晚的菜吧。',
+        showCancel: false,
+        confirmText: '知道了'
+      });
     } catch (err) {
       api.hideLoading();
       api.toastErr(err);

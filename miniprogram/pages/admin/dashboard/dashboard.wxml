@@ -5,7 +5,11 @@
     <view class="hero-title">后厨看板</view>
     <view class="hero-sub">更新于 {{updatedAt}} · {{closed ? '已截止，15 秒刷新一次' : '每 2 秒自动刷新'}}</view>
     <view class="hero-meta">
+      <view class="hero-chip" wx:if="{{sessionText}}">🎊 {{sessionText}}</view>
       <view class="hero-chip">{{closed ? '⏰ 已截止' : '🕒 截止 ' + deadlineText}}</view>
+    </view>
+    <view class="hero-links">
+      <text class="hero-link" bindtap="onNewSession">开始新的一场家宴 ›</text>
     </view>
   </view>
 
@@ -125,28 +129,51 @@
     </view>
   </view>
 
-  <!-- 客人的点赞榜：吃完的反馈，下次家宴照着这张榜挑菜 -->
-  <view class="card" wx:if="{{likes.length}}">
+  <!-- 客人的点赞榜：本场 + 跨场次累计（下次家宴照着挑菜） -->
+  <view class="card" wx:if="{{likes.length || likesAll.length}}">
     <view class="card-title">
-      <text>👍 点赞榜（客人吃完投的）</text>
-      <text class="muted">{{likeStats.voters}} 人参与</text>
+      <text>👍 点赞榜</text>
+      <text class="muted" wx:if="{{likes.length}}">本场 {{likeStats.voters}} 人参与</text>
     </view>
-    <view class="hint">一人最多投 3 道，重复提交会覆盖。下次家宴挑菜时，照这张榜来最不容易翻车。</view>
 
-    <view class="lk" wx:for="{{likes}}" wx:key="key">
+    <block wx:if="{{likes.length}}">
+      <view class="hint">本场（{{sessionText}}）：一人最多 3 道，重复提交会覆盖。</view>
+      <view class="lk" wx:for="{{likes}}" wx:key="key">
+        <text class="lk-rank">{{item.medal || item.rank}}</text>
+        <text class="lk-emoji">{{item.emoji}}</text>
+        <view class="lk-main">
+          <view class="lk-line">
+            <text class="lk-name">{{item.name}}</text>
+            <text class="lk-count">{{item.count}} 人赞</text>
+          </view>
+          <view class="lk-bar"><view class="lk-bar-in" style="width:{{item.barPercent}}%"></view></view>
+        </view>
+      </view>
+    </block>
+    <view class="hint" wx:else>本场还没人点赞。把小程序发群里，让朋友吃完来投一票。</view>
+
+    <!-- 累计榜：同一个人来过三场、场场都给这道菜点赞，就算 3 票 -->
+    <view class="hr"></view>
+    <view class="card-title">
+      <text>🏆 累计榜（跨场次）</text>
+      <text class="muted">{{likeStats.votersAll}} 人次</text>
+    </view>
+    <view class="hint">去过几次就投几次票——"来过三次都说好"比单场第一更有说服力。下次挑菜看这张。</view>
+
+    <view class="lk" wx:for="{{likesAll}}" wx:key="key">
       <text class="lk-rank">{{item.medal || item.rank}}</text>
       <text class="lk-emoji">{{item.emoji}}</text>
       <view class="lk-main">
         <view class="lk-line">
           <text class="lk-name">{{item.name}}</text>
-          <text class="lk-count">{{item.count}} 人赞</text>
+          <text class="lk-count">{{item.count}} 票</text>
         </view>
         <view class="lk-bar"><view class="lk-bar-in" style="width:{{item.barPercent}}%"></view></view>
       </view>
     </view>
 
     <view class="actions" style="margin-top:22rpx">
-      <view class="btn" bindtap="onResetVotes">清空点赞</view>
+      <view class="btn" bindtap="onResetVotes">清空本场点赞</view>
     </view>
   </view>
 

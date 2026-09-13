@@ -36,8 +36,13 @@ Page({
     boardOrders: [],
     boardStats: { orderCount: 0, totalPeople: 0, totalDishes: 0 },
 
-    // 点赞（吃完给今晚的菜投票，每人最多 maxVotes 道）
+    // 点赞（吃完给家宴的菜投票，每人每场最多 maxVotes 道）
     likeOpen: false,
+    dinners: [], // 我参加过的场次（用来切换着点评）
+    currentSessionId: '',
+    voteSessionId: '',
+    voteSession: null,
+    isCurrentVote: true,
     voteCandidates: [],
     voteList: [],
     myVotes: [],
@@ -45,7 +50,8 @@ Page({
     voterCount: 0,
     maxVotes: 3,
     pickCount: 0,
-    likeMap: {}
+    likeMap: {}, // 本场：几人赞
+    likeMapAll: {} // 跨场次累计：菜单行上的 👍N 用这个（"来过三次都说好"）
   },
 
   onLoad() {
@@ -239,38 +245,68 @@ Page({
     }
   },
 
-  /* -------------------- 点赞（吃完给今晚的菜投票） -------------------- */
+  /* -------------------- 点赞（吃完给家宴的菜投票） -------------------- */
 
   onToggleLike() {
     const likeOpen = !this.data.likeOpen;
     this.setData({ likeOpen });
-    if (likeOpen) this.loadVotes(true); // 展开时刷新，看到最新的"几人推荐"
+    if (likeOpen) {
+      // 展开时同时刷新"我参加过的场次"和当前选中场次的票
+      this.loadDinners();
+      this.loadVotes(true, this.data.voteSessionId);
+    }
+  },
+
+  /** 我参加过哪些场次（点过单或投过票的），当前这一场永远在里面 */
+  async loadDinners() {
+    try {
+      const res = await api.call('myDinners');
+      const cur = (res.current && res.current.id) || '';
+      const patch = { dinners: res.dinners || [], currentSessionId: cur };
+      if (!this.data.voteSessionId) patch.voteSessionId = cur;
+      this.setData(patch);
+    } catch (err) {
+      /* 静默：点赞卡片不该因为这一下拉不到就弹错误 */
+    }
   },
 
   /**
-   * 点赞数据一次拿全：候选菜（今晚点过的 ∪ 上架的）+ 我投了哪些 + 合计人数。
+   * 拉某一场的点赞数据（不传 sessionId = 当前这一场）
    *
-   * 注意这个卡片**不受点单截止时间影响**：点赞本来就是吃完才做的事，
-   * 截止之后（甚至主人都把菜下架了）才是投票高峰。
+   * 一次拿到：这一场的候选菜 + 我投了哪些 + 这一场合计 + 跨场次累计。
+   * 注意这个卡片**不受点单截止时间影响**：点赞本来就是吃完才做的事。
    */
-  async loadVotes(silent) {
+  async loadVotes(silent, sessionId) {
     try {
-      const res = await api.call('votes');
+      const res = await api.call('votes', sessionId ? { sessionId: sessionId } : {});
       const maxVotes = Number(res.maxVotes) || 3;
       this.pickVotes = (res.myVotes || []).slice(0, maxVotes);
       this.setData({
+        voteSessionId: (res.session && res.session.sessionId) || '',
+        voteSession: res.session || null,
+        isCurrentVote: !!res.isCurrent,
         voteCandidates: res.candidates || [],
         myVotes: res.myVotes || [],
         myVoteText: (res.myVoteNames || []).join('、'),
         voterCount: Number(res.voterCount) || 0,
         maxVotes: maxVotes,
-        likeMap: res.likeMap || {}
+        likeMap: res.likeMap || {},
+        likeMapAll: res.likeMapAll || {}
       });
       this.buildVoteList();
       if (this.data.dishes.length) this.buildShown(); // 菜品行上的 👍N 要跟着刷新
     } catch (err) {
       if (!silent) api.toastErr(err);
     }
+  },
+
+  /** 切换到另一场（我参加过的某一次）去点赞 */
+  async onPickSession(e) {
+    const id = e.currentTarget.dataset.id;
+    if (!id || id === this.data.voteSessionId) return;
+    api.loading('切换中');
+    await this.loadVotes(true, id);
+    api.hideLoading();
   },
 
   /** 候选菜 + 当前勾选 → 渲染列表 */
@@ -302,10 +338,12 @@ Page({
     if (!pick.length) return api.toast('先点几道你觉得好吃的菜');
     api.loading('提交中');
     try {
-      const res = await api.call('submitVotes', { dishIds: pick });
+      const res = await api.call('submitVotes', { dishIds: pick, sessionId: this.data.voteSessionId });
       api.hideLoading();
-      await this.loadVotes(true);
-      api.toast('谢谢！已给 ' + res.count + ' 道菜点赞', 'success');
+      await this.loadVotes(true, this.data.voteSessionId);
+      this.loadDinners();
+      const label = (res.session && res.session.name) || '';
+      api.toast('谢谢！已给「' + label + '」的 ' + res.count + ' 道菜点赞', 'success');
     } catch (err) {
       api.hideLoading();
       api.toastErr(err);
@@ -313,13 +351,15 @@ Page({
   },
 
   async onClearVotes() {
-    const ok = await api.confirm('撤销我点的赞？');
+    const name = (this.data.voteSession && this.data.voteSession.name) || '这一场';
+    const ok = await api.confirm('撤销我在「' + name + '」点的赞？');
     if (!ok) return;
     api.loading('处理中');
     try {
-      await api.call('submitVotes', { dishIds: [] });
+      await api.call('submitVotes', { dishIds: [], sessionId: this.data.voteSessionId });
       api.hideLoading();
-      await this.loadVotes(true);
+      await this.loadVotes(true, this.data.voteSessionId);
+      this.loadDinners();
       api.toast('已撤销');
     } catch (err) {
       api.hideLoading();
@@ -429,8 +469,8 @@ Page({
       category: d.category,
       tags: d.tags || [],
       limit: d.limit,
-      // 多少人点赞（老朋友吃过都说好）——新朋友点菜时的参考
-      likeText: (this.data.likeMap || {})[d._id] ? '👍 ' + this.data.likeMap[d._id] : '',
+      // 多少人点赞（**跨场次累计**：来过三次都说好的菜，新朋友一眼就看得到）
+      likeText: (this.data.likeMapAll || {})[d._id] ? '👍 ' + this.data.likeMapAll[d._id] : '',
       qty: this.cart[d._id] || 0,
       note: this.notes[d._id] || ''
     };

@@ -93,6 +93,36 @@
   color: #9c9089;
 }
 
+/* 场次选择：横滑一排小标签（第 1 场 / 中秋家宴 …），回到某一次去补投 */
+.like-sessions {
+  margin-top: 16rpx;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.like-session {
+  display: inline-block;
+  font-size: 23rpx;
+  color: #7b6e66;
+  background: #faf7f3;
+  border: 2rpx solid #ece3d9;
+  border-radius: 999rpx;
+  padding: 10rpx 22rpx;
+  margin-right: 12rpx;
+}
+
+.like-session-on {
+  color: #fff;
+  background: linear-gradient(135deg, #e05a35 0%, #c9401f 100%);
+  border-color: #c9401f;
+}
+
+.like-session-mark {
+  font-size: 19rpx;
+  opacity: 0.85;
+  margin-left: 8rpx;
+}
+
 /* 我投过谁：一眼看到自己的状态 */
 .like-mine {
   margin-top: 12rpx;

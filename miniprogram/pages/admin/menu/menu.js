@@ -65,11 +65,12 @@ Page({
         pantryFailed = true;
       }
 
-      // 客人的点赞同样兜住：挑下次的菜单时，"老朋友都说好"是最有用的参考
+      // 客人的点赞同样兜住：挑下次的菜单时，"老朋友都说好"是最有用的参考。
+      // 用 **跨场次累计**（去过几次就投几次票），而不是本场的票数。
       let likes = [];
       try {
         const voteRes = await api.call('votes');
-        likes = voteRes.totals || [];
+        likes = voteRes.totalsAll || voteRes.totals || [];
       } catch (e) {
         likes = [];
       }

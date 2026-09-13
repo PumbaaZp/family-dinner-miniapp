@@ -21,6 +21,15 @@ const COLLECTIONS = ['dishes', 'orders', 'config', 'votes'];
 const PARTY_ID = 'party';
 const MAX_LIMIT = 500;
 
+/**
+ * 第 1 场家宴的 sessionId。
+ *
+ * 为什么要固定成 'party'：**老数据里没有 sessionId 这个字段**（这一版才加的场次概念），
+ * 而那些订单/点赞都属于"第一场"。用 "缺字段 == 'party'" 来做等价，就不用跑数据迁移，
+ * 老环境升级上来历史数据自动归位。
+ */
+const LEGACY_SESSION = 'party';
+
 /** 每人最多给几道菜点赞 */
 const MAX_VOTES = 3;
 
@@ -148,21 +157,91 @@ function defaultConfig(hostCode) {
     shopping: {},
     // 家里囤货：{ 名称: { cat, qty, note } }。跟菜谱无关，纯"我家有什么"
     pantry: {},
+    // 场次：点单、点赞都按场次分开存，历史场次留着当参考
+    sessionId: LEGACY_SESSION,
+    sessionNo: 1,
+    sessionName: '',
+    sessionStartedAt: 0,
+    sessions: [], // [{ id, no, name, ts }]，sessionListOf 会兜底补上当前这一场
     hostCode: hostCode || randomCode(),
     admins: []
   };
 }
 
+/* ------------------------------ 场次 ------------------------------ */
+
+/** 一条订单/点赞属于哪一场（老数据没有 sessionId 字段 → 第 1 场） */
+function sessionIdOf(doc) {
+  const id = doc && doc.sessionId;
+  return id ? String(id) : LEGACY_SESSION;
+}
+
+/** 当前场次 */
+function sessionOf(cfg) {
+  const c = cfg || {};
+  return {
+    id: c.sessionId ? String(c.sessionId) : LEGACY_SESSION,
+    no: Number(c.sessionNo) || 1,
+    name: c.sessionName || c.title || '第 1 场家宴',
+    ts: Number(c.sessionStartedAt) || 0
+  };
+}
+
+/** 全部场次（新的在前）。老配置里没有 sessions 数组时，至少返回当前这一场 */
+function sessionListOf(cfg) {
+  const cur = sessionOf(cfg);
+  const list = (cfg && Array.isArray(cfg.sessions) ? cfg.sessions : []).map((s) => ({
+    id: String(s.id),
+    no: Number(s.no) || 0,
+    name: s.name || '第 ' + (Number(s.no) || 0) + ' 场家宴',
+    ts: Number(s.ts) || 0
+  }));
+  if (!list.some((s) => s.id === cur.id)) {
+    list.push({ id: cur.id, no: cur.no, name: cur.name, ts: cur.ts });
+  }
+  return list.sort((a, b) => b.no - a.no || b.ts - a.ts);
+}
+
+/** 某个场次的序号/名字/是不是当前场 */
+function sessionLabel(cfg, sessionId) {
+  const cur = sessionOf(cfg);
+  const hit = sessionListOf(cfg).filter((s) => s.id === sessionId)[0];
+  const one = hit || { id: sessionId, no: 0, name: '家宴', ts: 0 };
+  return {
+    sessionId: one.id,
+    no: one.no,
+    name: one.name,
+    ts: one.ts,
+    current: one.id === cur.id
+  };
+}
+
+/** 我在某一场的那一单（老数据缺 sessionId 也算第 1 场） */
+async function findMyOrder(openid, sessionId) {
+  const res = await db.collection('orders').where({ _openid: openid }).limit(MAX_LIMIT).get();
+  return (res.data || []).filter((o) => sessionIdOf(o) === sessionId)[0] || null;
+}
+
+/** 只保留某一场的订单 / 点赞 */
+function pickSession(docs, sessionId) {
+  return (docs || []).filter((d) => sessionIdOf(d) === sessionId);
+}
+
 /** 对外暴露的配置：非管理员看不到主人口令 */
 function publicConfig(cfg, isAdmin) {
   if (!cfg) return null;
+  const s = sessionOf(cfg);
   const out = {
     title: cfg.title || '周末家宴',
     host: cfg.host || '主人',
     address: cfg.address || '',
     notice: cfg.notice || '',
     deadlineTs: Number(cfg.deadlineTs) || 0,
-    maxDishesPerOrder: Number(cfg.maxDishesPerOrder) || 0
+    maxDishesPerOrder: Number(cfg.maxDishesPerOrder) || 0,
+    // 场次给所有人（朋友要靠它知道自己参加的是第几场）
+    sessionId: s.id,
+    sessionNo: s.no,
+    sessionName: s.name
   };
   if (isAdmin) out.hostCode = cfg.hostCode || '';
   return out;
@@ -424,6 +503,7 @@ async function handleUpdateConfig(openid, event) {
 async function handleSubmitOrder(openid, event) {
   const cfg = await getConfig();
   if (!cfg) throw new Error('家宴还没初始化，请等主人开通');
+  const session = sessionOf(cfg);
 
   const deadlineTs = Number(cfg.deadlineTs) || 0;
   if (deadlineTs && Date.now() > deadlineTs) throw new Error('点单已经截止啦');
@@ -475,6 +555,10 @@ async function handleSubmitOrder(openid, event) {
 
   const doc = {
     _openid: openid,
+    // 订单按场次存：下一场家宴开起来时，这一单会**留在历史里**当参考，不会被覆盖掉
+    sessionId: session.id,
+    sessionNo: session.no,
+    sessionName: session.name,
     nick: str(event.nick, 20) || '匿名朋友',
     partySize: int(event.partySize, 1, 1, 50),
     arriveAt: str(event.arriveAt, 20),
@@ -486,29 +570,30 @@ async function handleSubmitOrder(openid, event) {
     updatedAt: db.serverDate()
   };
 
-  const mine = await db.collection('orders').where({ _openid: openid }).limit(1).get();
-  if (mine.data && mine.data.length) {
-    const id = mine.data[0]._id;
-    await db.collection('orders').doc(id).update({ data: doc });
-    return ok({ orderId: id, updated: true });
+  const mine = await findMyOrder(openid, session.id);
+  if (mine) {
+    await db.collection('orders').doc(mine._id).update({ data: doc });
+    return ok({ orderId: mine._id, updated: true, session: session });
   }
   doc.createdAt = db.serverDate();
   const added = await db.collection('orders').add({ data: doc });
-  return ok({ orderId: added._id, updated: false });
+  return ok({ orderId: added._id, updated: false, session: session });
 }
 
+/** 我这一场的点单（不含别的场次的历史单） */
 async function handleMyOrder(openid) {
-  const res = await db.collection('orders').where({ _openid: openid }).limit(1).get();
-  const order = (res.data && res.data[0]) || null;
+  const cfg = await getConfig();
+  const session = sessionOf(cfg);
+  const order = await findMyOrder(openid, session.id);
   if (order) delete order._openid;
-  return ok({ order });
+  return ok({ order, session: session });
 }
 
 async function handleCancelOrder(openid) {
-  const res = await db.collection('orders').where({ _openid: openid }).limit(1).get();
-  if (res.data && res.data.length) {
-    await db.collection('orders').doc(res.data[0]._id).remove();
-  }
+  const cfg = await getConfig();
+  const session = sessionOf(cfg);
+  const mine = await findMyOrder(openid, session.id);
+  if (mine) await db.collection('orders').doc(mine._id).remove();
   return ok({ removed: true });
 }
 
@@ -812,13 +897,17 @@ function likeMapOf(totals) {
 }
 
 /**
- * 点赞的候选名单：今晚真正吃到的菜。
+ * 点赞的候选名单：这一场真正吃到的菜。
  *
- * 取 = 订单里出现过的菜（已按份数排序） ∪ 已上架的菜。
- * 为什么连"已下架但点过"的也算：家宴一结束，主人常把菜一键全部下架，
+ * 取 = 这一场订单里出现过的菜（按份数排序） ∪ 我自己在这一场投过的菜
+ *      ∪（只有当前场次才加）已上架的菜。
+ *
+ * 为什么"已上架的菜"只给当前场次：上架状态是**现在**的菜单，跟三天前那场家宴没关系。
+ * 为什么"我投过的菜"一定要在里面：不然那道菜后来被删了/换了，朋友就取消不掉了。
+ * 为什么连"下架但点过"的也算：家宴一结束主人常把菜一键全部下架，
  * 那时候朋友端菜单是空的——可恰恰是这时候大家才来点赞。
  */
-function buildBallot(orderDocs, dishDocs, likeMap) {
+function buildBallot(orderDocs, dishDocs, likeMap, extraIds, includeAvailable) {
   const dishMap = {};
   (dishDocs || []).forEach((d) => {
     dishMap[d._id] = d;
@@ -847,62 +936,147 @@ function buildBallot(orderDocs, dishDocs, likeMap) {
     });
   };
 
-  // 点过的先列（按份数从多到少），没点过的上架菜跟在后面
+  // 点过的先列（按份数从多到少）
   (orderDocs || []).forEach((o) => {
     (o.items || []).forEach((i) => push(i.dishId, i.name));
   });
   list.sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name));
-  (dishDocs || []).forEach((d) => {
-    if (d.available) push(d._id, d.name);
-  });
+
+  // 我投过但这道菜没在这一场的订单里：补进来，让他能取消
+  (extraIds || []).forEach((id) => push(id));
+  if (includeAvailable) {
+    (dishDocs || []).forEach((d) => {
+      if (d.available) push(d._id, d.name);
+    });
+  }
 
   return list;
 }
 
 /**
+ * 我在哪些场次露过面（点过单 或 投过票）。
+ *
+ * "去过一次"的定义就是这两件事之一，而不是"当时在不在饭桌上"——
+ * 系统只能知道这些。当前这一场永远在列表里（哪怕还没点单，也可以先点赞）。
+ */
+async function handleMyDinners(openid) {
+  const cfg = await getConfig();
+  if (!cfg) return ok({ inited: false, current: null, dinners: [] });
+
+  const cur = sessionOf(cfg);
+  const [votes, orderRes] = await Promise.all([
+    readVotes(),
+    db.collection('orders').limit(MAX_LIMIT).get()
+  ]);
+
+  const index = {};
+  const touch = (sid) => {
+    if (!index[sid]) {
+      index[sid] = Object.assign(sessionLabel(cfg, sid), { ordered: false, voted: false, voteCount: 0, orderQty: 0 });
+    }
+    return index[sid];
+  };
+
+  (orderRes.data || []).forEach((o) => {
+    if (o._openid !== openid) return;
+    const one = touch(sessionIdOf(o));
+    one.ordered = true;
+    one.orderQty = Number(o.totalQty) || 0;
+    one.orderItems = (o.items || []).length;
+  });
+  votes.forEach((v) => {
+    if (v._openid !== openid) return;
+    const one = touch(sessionIdOf(v));
+    one.voted = true;
+    one.voteCount = (v.items || []).length;
+    one.voteNames = (v.items || []).map((i) => i.name);
+  });
+  touch(cur.id);
+
+  const dinners = Object.keys(index).map((k) => index[k]);
+  // 当前这一场排最前，其余按场次序号倒序（最近的在上面）
+  dinners.sort((a, b) => {
+    if (a.current !== b.current) return a.current ? -1 : 1;
+    return (b.no || 0) - (a.no || 0) || (b.ts || 0) - (a.ts || 0);
+  });
+
+  return ok({ inited: true, current: cur, dinners: dinners, sessionCount: sessionListOf(cfg).length });
+}
+
+/**
  * 看看点赞情况（不需要口令，任何朋友都能看）
  *
- * 一次返回三样，朋友端不用再发第二个请求：
- *   candidates 今晚的菜（投票候选）+ myVotes 我投了哪些 + 合计人数
- * 刻意只返回菜名和人数，不带别人的 openid。
+ * event.sessionId 不传就当作"当前这一场"。一次返回朋友端要的全部东西：
+ *   candidates 这一场的菜（投票候选）+ myVotes 我投了哪些 + 这一场合计 + 跨场次累计
  */
-async function handleVotes(openid) {
+async function handleVotes(openid, event) {
+  const cfg = await getConfig();
+  const cur = sessionOf(cfg);
+  const wantId = str(event && event.sessionId, 32) || cur.id;
+
   const [votes, dishRes, orderRes] = await Promise.all([
     readVotes(),
     db.collection('dishes').limit(MAX_LIMIT).get(),
     db.collection('orders').orderBy('createdAt', 'asc').limit(MAX_LIMIT).get()
   ]);
-  const mine = votes.filter((v) => v._openid === openid)[0];
-  const totals = buildLikeTotals(votes, dishRes.data);
+
+  const isCurrent = wantId === cur.id;
+  const session = sessionLabel(cfg, wantId);
+  const sessionVotes = pickSession(votes, wantId);
+  const sessionOrders = pickSession(orderRes.data, wantId);
+  const mine = sessionVotes.filter((v) => v._openid === openid)[0];
+
+  const totals = buildLikeTotals(sessionVotes, dishRes.data);
+  const totalsAll = buildLikeTotals(votes, dishRes.data);
+  const likeMap = likeMapOf(totals);
+  const myVotes = mine ? (mine.items || []).map((i) => i.dishId) : [];
 
   return ok({
-    myVotes: mine ? (mine.items || []).map((i) => i.dishId) : [],
+    session: session,
+    current: cur,
+    isCurrent: isCurrent,
+    canVote: isCurrent || !!mine || sessionOrders.some((o) => o._openid === openid),
+    myVotes: myVotes,
     myVoteNames: mine ? (mine.items || []).map((i) => i.name) : [],
-    candidates: buildBallot(orderRes.data, dishRes.data, likeMapOf(totals)),
+    candidates: buildBallot(sessionOrders, dishRes.data, likeMap, myVotes, isCurrent),
     totals: totals,
-    likeMap: likeMapOf(totals),
-    voterCount: votes.length,
+    totalsAll: totalsAll,
+    likeMap: likeMap,
+    likeMapAll: likeMapOf(totalsAll),
+    voterCount: sessionVotes.length,
+    voterCountAll: votes.length,
     maxVotes: MAX_VOTES
   });
 }
 
 /**
- * 提交点赞：从菜单里挑最多 3 道菜。
+ * 给某一场的菜点赞：一人一场最多 3 道，重复提交即覆盖（传空数组 = 撤销）。
  *
- * 几点刻意的设计：
- *   - **不受点单截止时间限制**：点赞本来就是吃完才做的事，截止后才是投票高峰。
- *   - **重复提交即覆盖**：跟点单一样，改主意了直接重交，不需要先撤销。
- *   - **传空数组 = 撤销我的赞**：不报错（幂等），方便"点错了想全撤"。
- *   - **只认菜库里真实存在的菜**：已下架的菜照样能点赞（家宴结束后主人常把菜下架），
- *     但菜库里删掉的菜就投不了，避免刷出一堆幽灵条目。
+ * 关键点：
+ *   - **按场次存票**：同一个人来了三次、每次都给「红烧肉」点赞，那就是 3 票。
+ *     跨场次累计时这正是想要的信号（"他来过三次都说好"）。
+ *   - **一场一人一份票**：同一场里反复提交只会覆盖自己，不会把自己刷成 10 票。
+ *   - **不受点单截止时间限制**：点赞本来就是吃完才做的事。
+ *   - **只能给自己参加过的场次投票**（或当前这一场），防止翻旧账乱投。
  */
 async function handleSubmitVotes(openid, event) {
   const cfg = await getConfig();
   if (!cfg) throw new Error('家宴还没初始化，请等主人开通');
 
-  const raw = Array.isArray(event.dishIds) ? event.dishIds : [];
+  const cur = sessionOf(cfg);
+  const sessionId = str(event.sessionId, 32) || cur.id;
+  const isCurrent = sessionId === cur.id;
 
-  const dishRes = await db.collection('dishes').limit(MAX_LIMIT).get();
+  const [dishRes, orderRes, votes] = await Promise.all([
+    db.collection('dishes').limit(MAX_LIMIT).get(),
+    db.collection('orders').limit(MAX_LIMIT).get(),
+    readVotes()
+  ]);
+  const mine = pickSession(votes, sessionId).filter((v) => v._openid === openid)[0];
+  const participated = isCurrent || !!mine || pickSession(orderRes.data, sessionId).some((o) => o._openid === openid);
+  if (!participated) throw new Error('这一场家宴你没参加过，投不了票');
+
+  const raw = Array.isArray(event.dishIds) ? event.dishIds : [];
   const byId = {};
   (dishRes.data || []).forEach((d) => {
     byId[d._id] = d;
@@ -920,19 +1094,23 @@ async function handleSubmitVotes(openid, event) {
   // 否则客户端传了 [A, B, C, A] 这种带重复的数组，会被误判成"投了 4 道"而拒绝。
   if (items.length > MAX_VOTES) throw new Error('最多只能给 ' + MAX_VOTES + ' 道菜点赞');
 
-  const mine = await withCollection('votes', () => db.collection('votes').where({ _openid: openid }).limit(1).get());
-  const existed = !!(mine.data && mine.data.length);
+  const label = sessionLabel(cfg, sessionId);
+  const doc = {
+    _openid: openid,
+    sessionId: sessionId,
+    sessionNo: label.no,
+    sessionName: label.name,
+    items: items,
+    updatedAt: db.serverDate()
+  };
 
   if (!items.length) {
-    if (existed) {
-      await withCollection('votes', () => db.collection('votes').doc(mine.data[0]._id).remove());
-    }
-    return ok({ cleared: true, count: 0, dishIds: [] });
+    if (mine) await withCollection('votes', () => db.collection('votes').doc(mine._id).remove());
+    return ok({ cleared: true, count: 0, dishIds: [], session: label });
   }
 
-  const doc = { _openid: openid, items: items, updatedAt: db.serverDate() };
-  if (existed) {
-    await withCollection('votes', () => db.collection('votes').doc(mine.data[0]._id).update({ data: doc }));
+  if (mine) {
+    await withCollection('votes', () => db.collection('votes').doc(mine._id).update({ data: doc }));
   } else {
     doc.createdAt = db.serverDate();
     await withCollection('votes', () => db.collection('votes').add({ data: doc }));
@@ -943,38 +1121,86 @@ async function handleSubmitVotes(openid, event) {
     count: items.length,
     dishIds: items.map((i) => i.dishId),
     names: items.map((i) => i.name),
+    session: label,
     maxVotes: MAX_VOTES
   });
 }
 
-/** 清空所有点赞（主人用：换季/试完想重来） */
-async function handleResetVotes(openid) {
+/** 清空点赞：带 sessionId 只清那一场，不带就清全部 */
+async function handleResetVotes(openid, event) {
   await requireAdmin(openid);
+  const sessionId = str(event && event.sessionId, 32);
   const votes = await readVotes();
-  if (!votes.length) return ok({ cleared: 0 });
+  const targets = sessionId ? votes.filter((v) => sessionIdOf(v) === sessionId) : votes;
+  if (!targets.length) return ok({ cleared: 0, sessionId: sessionId || '' });
 
   // 逐条删：比 where().remove() 稳妥，也不受单次删除上限影响
-  for (let i = 0; i < votes.length; i += 20) {
+  for (let i = 0; i < targets.length; i += 20) {
     await Promise.all(
-      votes.slice(i, i + 20).map((v) => withCollection('votes', () => db.collection('votes').doc(v._id).remove()))
+      targets.slice(i, i + 20).map((v) => withCollection('votes', () => db.collection('votes').doc(v._id).remove()))
     );
   }
-  return ok({ cleared: votes.length });
+  return ok({ cleared: targets.length, sessionId: sessionId || '' });
+}
+
+/**
+ * 开始新的一场家宴（仅主人）
+ *
+ * 做了三件事：
+ *   1. 当前这一场归档进 sessions 列表，开一个新的 sessionId / 序号 / 名字
+ *   2. 重置「已采购」勾选（那是上一场买菜用的），**家里的库存不动**
+ *   3. 上一场的订单和点赞**原样保留**：朋友还能回去给那一场点赞，累计榜也不会丢
+ *
+ * 刻意不做的事：不动菜库的上架状态（主人自己决定今晚做什么）。
+ */
+async function handleNewSession(openid, event) {
+  const cfg = await requireAdmin(openid);
+  const cur = sessionOf(cfg);
+  const no = cur.no + 1;
+  const name = str(event.name, 20) || '第 ' + no + ' 场家宴';
+  const id = 's' + Date.now().toString(36);
+  const ts = Date.now();
+
+  const sessions = sessionListOf(cfg).map((s) => ({ id: s.id, no: s.no, name: s.name, ts: s.ts }));
+  sessions.push({ id: id, no: no, name: name, ts: ts });
+
+  await saveConfig(
+    Object.assign({}, cfg, {
+      sessionId: id,
+      sessionNo: no,
+      sessionName: name,
+      sessionStartedAt: ts,
+      sessions: sessions,
+      shopping: {} // 新的一场，采购勾选重来；pantry（家里有什么）保持
+    })
+  );
+
+  return ok({
+    prev: cur,
+    session: { id: id, no: no, name: name, ts: ts, current: true },
+    sessions: sessions.length
+  });
 }
 
 /** 后厨看板汇总（仅主人） */
 async function handleSummary(openid) {
   await requireAdmin(openid);
   const cfg = await getConfig();
+  const session = sessionOf(cfg);
   const [orderRes, dishRes, votes] = await Promise.all([
     db.collection('orders').orderBy('createdAt', 'asc').limit(MAX_LIMIT).get(),
     db.collection('dishes').limit(MAX_LIMIT).get(),
     readVotes()
   ]);
 
-  const likes = buildLikeTotals(votes, dishRes.data);
-  const data = aggregateOrders(cfg, orderRes.data, dishRes.data, true, likeMapOf(likes));
-  const ingredients = buildIngredients(dishRes.data, orderRes.data, cfg.shopping || {}, cfg.pantry || {});
+  // 后厨看板只看**当前这一场**：上一场的订单留着做历史，但不该出现在今晚的汇总里
+  const orders = pickSession(orderRes.data, session.id);
+  const sessionVotes = pickSession(votes, session.id);
+
+  const likes = buildLikeTotals(sessionVotes, dishRes.data);
+  const likesAll = buildLikeTotals(votes, dishRes.data);
+  const data = aggregateOrders(cfg, orders, dishRes.data, true, likeMapOf(likes));
+  const ingredients = buildIngredients(dishRes.data, orders, cfg.shopping || {}, cfg.pantry || {});
   const pantry = pantryList(cfg);
 
   // 三个数加起来正好是 total：家里有的 / 已经买了的 / 还要买的
@@ -984,10 +1210,19 @@ async function handleSummary(openid) {
 
   return ok(
     Object.assign({ config: publicConfig(cfg, true) }, data, {
+      session: session,
+      sessions: sessionListOf(cfg),
       ingredients: ingredients,
       pantry: pantry,
       likes: likes,
-      likeStats: { voters: votes.length, likedDishes: likes.length, maxVotes: MAX_VOTES },
+      likesAll: likesAll,
+      likeStats: {
+        voters: sessionVotes.length,
+        likedDishes: likes.length,
+        maxVotes: MAX_VOTES,
+        votersAll: votes.length,
+        likedDishesAll: likesAll.length
+      },
       ingredientStats: {
         total: ingredients.length,
         missing: missing,
@@ -1029,17 +1264,46 @@ async function handleResetShopping(openid) {
  */
 async function handleBoard() {
   const cfg = await getConfig();
-  if (!cfg) return ok({ inited: false, orders: [], dishTotals: [], likes: [], stats: { orderCount: 0, totalPeople: 0, totalDishes: 0, dishKindCount: 0 } });
+  if (!cfg) {
+    return ok({
+      inited: false,
+      orders: [],
+      dishTotals: [],
+      likes: [],
+      likesAll: [],
+      session: null,
+      stats: { orderCount: 0, totalPeople: 0, totalDishes: 0, dishKindCount: 0 }
+    });
+  }
 
+  const session = sessionOf(cfg);
   const [orderRes, dishRes, votes] = await Promise.all([
     db.collection('orders').orderBy('createdAt', 'asc').limit(MAX_LIMIT).get(),
     db.collection('dishes').limit(MAX_LIMIT).get(),
     readVotes()
   ]);
 
-  const likes = buildLikeTotals(votes, dishRes.data);
-  const data = aggregateOrders(cfg, orderRes.data, dishRes.data, false, likeMapOf(likes));
-  return ok(Object.assign({ inited: true, config: publicConfig(cfg, false), likes: likes, voterCount: votes.length }, data));
+  // 朋友端的「大家都在点什么」也只看当前这一场
+  const orders = pickSession(orderRes.data, session.id);
+  const sessionVotes = pickSession(votes, session.id);
+  const likes = buildLikeTotals(sessionVotes, dishRes.data);
+  const likesAll = buildLikeTotals(votes, dishRes.data);
+  const data = aggregateOrders(cfg, orders, dishRes.data, false, likeMapOf(likes));
+
+  return ok(
+    Object.assign(
+      {
+        inited: true,
+        config: publicConfig(cfg, false),
+        session: session,
+        likes: likes,
+        likesAll: likesAll,
+        voterCount: sessionVotes.length,
+        voterCountAll: votes.length
+      },
+      data
+    )
+  );
 }
 
 /**
@@ -1233,11 +1497,15 @@ exports.main = async (event) => {
       case 'clearPantry':
         return await handleClearPantry(openid);
       case 'votes':
-        return await handleVotes(openid);
+        return await handleVotes(openid, event);
       case 'submitVotes':
         return await handleSubmitVotes(openid, event);
       case 'resetVotes':
-        return await handleResetVotes(openid);
+        return await handleResetVotes(openid, event);
+      case 'myDinners':
+        return await handleMyDinners(openid);
+      case 'newSession':
+        return await handleNewSession(openid, event);
       default:
         return fail('未知操作：' + action);
     }

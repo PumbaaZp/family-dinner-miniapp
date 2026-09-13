@@ -624,6 +624,144 @@ async function runBackend() {
 
   r = await call('setItemQty', { orderId: wangOrder3.orderId, dishId: second._id, qty: 1 }, HOST);
   expect('对已删除的订单再改份数 → 明确提示', r.ok === false && /不在了/.test(r.msg), r.msg);
+
+  /* --- 场次：点赞按场次分开，"来过几次就能投几次" --- */
+  const countOf = (totals, dishId) => {
+    const hit = (totals || []).filter((t) => t.dishId === dishId)[0];
+    return hit ? hit.count : 0;
+  };
+  const V1 = 'openid_repeat_guest';
+  const STRANGER = 'openid_stranger';
+
+  let s1 = (await call('summary', {}, HOST)).data.session;
+  expect('第 1 场默认是 legacy 场次（老数据自动归位）', s1.id === 'party' && s1.no === 1, JSON.stringify(s1));
+  r = await call('whoami', {}, GUEST_B);
+  expect('朋友也能看到"现在是第几场"',
+    r.data.config.sessionId === 'party' && r.data.config.sessionNo === 1 && !!r.data.config.sessionName,
+    JSON.stringify({ id: r.data.config.sessionId, no: r.data.config.sessionNo, name: r.data.config.sessionName }));
+
+  const allNow = (await call('listDishes', { all: true }, HOST)).data.dishes;
+  const avail = allNow.filter((d) => d.available);
+  const dishA = avail[0];
+  const dishB = avail[1];
+
+  // 第 1 场：一位客人点了 A 并给 A 点赞
+  await call('submitOrder', { nick: '老客人', partySize: 2, items: [{ dishId: dishA._id, qty: 1 }] }, V1);
+  r = await call('submitVotes', { dishIds: [dishA._id] }, V1);
+  expect('第 1 场：点赞带上场次信息', r.ok && r.data.session.no === 1 && r.data.session.name, JSON.stringify(r.data.session));
+  r = await call('votes', {}, V1);
+  expect('第 1 场：isCurrent 为 true', r.data.isCurrent === true && r.data.session.no === 1);
+  expect('第 1 场：票记在我名下', r.data.myVotes.length === 1 && countOf(r.data.totals, dishA._id) === 1, JSON.stringify(r.data.totals));
+
+  r = await call('myDinners', {}, V1);
+  expect('「我参加过的场次」此时只有第 1 场',
+    r.data.dinners.length === 1 && r.data.dinners[0].current === true && r.data.dinners[0].ordered === true && r.data.dinners[0].voted === true,
+    JSON.stringify(r.data.dinners));
+  expect('场次里带着那一场投过的菜名（朋友端要显示）',
+    r.data.dinners[0].voteNames.length === 1 && r.data.dinners[0].voteNames[0] === dishA.name,
+    JSON.stringify(r.data.dinners[0].voteNames));
+
+  /* 开新的一场 */
+  r = await call('newSession', { name: '中秋家宴' }, GUEST_C);
+  expect('非管理员不能开始新的一场', r.ok === false && /权限/.test(r.msg), r.msg);
+
+  // 先留一个"已采购"勾选，验证开新场会重置
+  const ingName = (dishA.ingredients || [])[0];
+  await call('toggleIngredient', { name: ingName, purchased: true }, HOST);
+  const purchasedBefore = (await call('summary', {}, HOST)).data.ingredientStats.purchased;
+
+  r = await call('newSession', { name: '中秋家宴' }, HOST);
+  expect('开始新的一场：序号 +1、名字记下、上一场也返回',
+    r.ok && r.data.session.no === 2 && r.data.session.name === '中秋家宴' && r.data.prev.id === 'party',
+    JSON.stringify(r.data));
+
+  r = await call('summary', {}, HOST);
+  expect('新一场的看板是空的（上一场的订单不会混进来）', r.data.stats.orderCount === 0, JSON.stringify(r.data.stats));
+  expect('新一场的看板带场次列表（两场都在）',
+    r.data.session.no === 2 && r.data.sessions.length === 2 && r.data.sessions[0].no === 2,
+    JSON.stringify(r.data.sessions.map((s) => s.no + ':' + s.name)));
+  expect('开新场会重置「已采购」勾选（那是上一场买菜用的）',
+    purchasedBefore > 0 && r.data.ingredientStats.purchased === 0,
+    '之前=' + purchasedBefore + ' 现在=' + r.data.ingredientStats.purchased);
+
+  r = await call('votes', { sessionId: 'party' }, V1);
+  expect('回到第 1 场：候选来自那一场的订单（订单没被新场次清掉）',
+    r.data.candidates.some((c) => c.dishId === dishA._id && c.ordered === true) && r.data.isCurrent === false,
+    JSON.stringify(r.data.candidates.slice(0, 3).map((c) => c.name + ':' + c.ordered)));
+  expect('回到第 1 场：候选里不会混进"现在上架的新菜"（那是现在的菜单）',
+    r.data.candidates.every((c) => c.ordered === true),
+    JSON.stringify(r.data.candidates.map((c) => c.name + ':' + c.ordered)));
+  expect('回到第 1 场：我那一场的票还在（跟本场的票分开存）',
+    r.data.myVotes.length === 1 && r.data.myVotes[0] === dishA._id,
+    JSON.stringify(r.data.myVotes));
+
+  /* 同一道菜，同一个人，在第 2 场再投一次 —— 这是允许的 */
+  await call('submitOrder', { nick: '老客人', partySize: 2, items: [{ dishId: dishA._id, qty: 2 }] }, V1);
+  r = await call('submitVotes', { dishIds: [dishA._id] }, V1);
+  expect('第 2 场：同一个人给同一道菜再投一次是允许的',
+    r.ok && r.data.count === 1 && r.data.session.no === 2, JSON.stringify(r.data));
+  r = await call('votes', {}, V1);
+  expect('累计榜把两场加起来（这道菜 2 票）', countOf(r.data.totalsAll, dishA._id) === 2, JSON.stringify(r.data.totalsAll));
+  expect('本场榜只算这一场（1 票）', countOf(r.data.totals, dishA._id) === 1, JSON.stringify(r.data.totals));
+  expect('"我投了哪些"是分开的：回到第 1 场读到的仍是那一场的票',
+    r.data.myVotes[0] === dishA._id && r.data.isCurrent === true);
+
+  r = await call('myDinners', {}, V1);
+  expect('「我参加过的场次」变成 2 个，当前那一场排最前',
+    r.data.dinners.length === 2 && r.data.dinners[0].current === true && r.data.dinners[0].no === 2 && r.data.dinners[1].no === 1,
+    JSON.stringify(r.data.dinners.map((d) => d.no + ':' + d.name + (d.current ? '*' : ''))));
+  expect('老那场标着"我投过"（能回去改票）', r.data.dinners[1].voted === true && r.data.dinners[0].voted === true,
+    JSON.stringify(r.data.dinners.map((d) => d.voted)));
+
+  r = await call('submitVotes', { dishIds: [dishB._id], sessionId: 'party' }, V1);
+  expect('回旧场次改票：提交成功且只影响那一场', r.ok && r.data.session.no === 1, JSON.stringify(r.data.session));
+  r = await call('votes', { sessionId: 'party' }, V1);
+  expect('旧场次的票被改成新选的那道', r.data.myVotes.length === 1 && r.data.myVotes[0] === dishB._id, JSON.stringify(r.data.myVotes));
+  r = await call('votes', {}, V1);
+  expect('改旧场次的票不会动到本场的票', r.data.myVotes[0] === dishA._id, JSON.stringify(r.data.myVotes));
+
+  r = await call('submitVotes', { dishIds: [dishB._id], sessionId: 'party' }, STRANGER);
+  expect('没参加过的场次不能投票', r.ok === false && /没参加/.test(r.msg), r.msg);
+  r = await call('submitVotes', { dishIds: [dishA._id] }, STRANGER);
+  expect('当前这一场谁都能投（没点单也能投）', r.ok === true, r.msg);
+
+  r = await call('resetVotes', { sessionId: 'party' }, GUEST_C);
+  expect('非管理员不能清空某一场的点赞', r.ok === false && /权限/.test(r.msg), r.msg);
+  r = await call('resetVotes', { sessionId: 'party' }, HOST);
+  expect('清空指定场次的点赞：只清那一场', r.ok && r.data.cleared >= 1 && r.data.sessionId === 'party', JSON.stringify(r.data));
+  r = await call('votes', {}, V1);
+  expect('清掉旧场次后，那一场的票从累计里消失（dishB 归零）', countOf(r.data.totalsAll, dishB._id) === 0, JSON.stringify(r.data.totalsAll));
+  expect('本场那 1 票不受影响', countOf(r.data.totalsAll, dishA._id) >= 1, JSON.stringify(r.data.totalsAll));
+
+  /* 老环境升级上来：没有 sessionId 的老数据算第 1 场 */
+  state.collections.orders.push({
+    _id: 'legacy_order_1',
+    _openid: 'openid_legacy',
+    nick: '老数据',
+    partySize: 1,
+    items: [{ dishId: avail[2]._id, name: avail[2].name, emoji: '🍽', qty: 1 }],
+    totalQty: 1,
+    createdAt: new Date()
+  });
+  r = await call('myDinners', {}, 'openid_legacy');
+  expect('老数据（没有 sessionId）算作第 1 场：出现在"我参加过的"里',
+    r.data.dinners.filter((d) => d.no === 1 && d.ordered === true).length === 1,
+    JSON.stringify(r.data.dinners.map((d) => d.no + ':' + d.ordered)));
+  expect('当前这一场永远在列表最前（没参加过也能先点赞）',
+    r.data.dinners[0].current === true && r.data.dinners[0].ordered === false,
+    JSON.stringify(r.data.dinners.map((d) => d.no + (d.current ? '*' : ''))));
+  r = await call('votes', { sessionId: 'party' }, 'openid_legacy');
+  expect('老数据能在第 1 场投票（参与判定也认老数据）', r.data.canVote === true && r.data.candidates.some((c) => c.dishId === avail[2]._id), JSON.stringify(r.data.candidates.map((c) => c.name)));
+  r = await call('votes', {}, 'openid_legacy');
+  expect('老数据的老订单不会串到第 2 场（候选里"点过的"只来自本场订单）',
+    r.data.candidates.filter((c) => c.ordered).every((c) => c.dishId === dishA._id),
+    JSON.stringify(r.data.candidates.filter((c) => c.ordered).map((c) => c.name)));
+  r = await call('submitVotes', { dishIds: [avail[2]._id], sessionId: 'party' }, 'openid_legacy');
+  expect('老数据的老客人可以补投第 1 场', r.ok === true && r.data.session.no === 1, r.msg);
+
+  /* 场次是"归档"而不是"删除"：旧场次的订单还在，能用它查那一场 */
+  r = await call('myDinners', {}, V1);
+  expect('换场之后，客人仍然能看到并回到旧场次', r.data.dinners.filter((d) => d.no === 1).length === 1);
 }
 
 /**
@@ -1421,10 +1559,47 @@ async function loadPages() {
     expect('点赞页：选满之后仍然能取消已选的那道', likeCtx.data.pickCount === 2 && likeCtx.data.voteList[1].picked === false,
       JSON.stringify(likeCtx.data.voteList.map((v) => v.name + ':' + v.picked)));
 
-    expect('点赞页：菜品行上的 👍N 会渲染出来',
-      loaded.index.dishRow.call({ cart: {}, notes: {}, data: { likeMap: { d1: 3 } } }, { _id: 'd1', name: '红烧肉' }).likeText === '👍 3' &&
-        loaded.index.dishRow.call({ cart: {}, notes: {}, data: { likeMap: {} } }, { _id: 'd9', name: '没赞过的菜' }).likeText === '',
-      '有人赞显示 👍N，没人赞不显示');
+    expect('点赞页：菜品行上的 👍N 用【跨场次累计】（不然"来过三次都说好"看不出来）',
+      loaded.index.dishRow.call({ cart: {}, notes: {}, data: { likeMap: { d1: 9 }, likeMapAll: { d1: 3 } } }, { _id: 'd1', name: '红烧肉' }).likeText === '👍 3' &&
+        loaded.index.dishRow.call({ cart: {}, notes: {}, data: { likeMapAll: {} } }, { _id: 'd9', name: '没赞过的菜' }).likeText === '',
+      '有人赞显示累计 👍N，没人赞不显示');
+
+    /* 场次切换：把某一场的票读回来 */
+    const pickCtx = {
+      data: { voteSessionId: 'party', voteCandidates: [] },
+      calls: [],
+      setData(d) {
+        Object.assign(this.data, d);
+      },
+      async loadVotes(silent, id) {
+        this.calls.push({ silent: silent, id: id });
+      }
+    };
+    pickCtx.onPickSession = loaded.index.onPickSession;
+    pickCtx.buildVoteList = loaded.index.buildVoteList;
+    pickCtx.onPickSession.call(pickCtx, { currentTarget: { dataset: { id: 'party' } } });
+    expect('点赞页：点自己已经选中的那一场不做任何请求', pickCtx.calls.length === 0);
+    pickCtx.onPickSession.call(pickCtx, { currentTarget: { dataset: { id: 's2' } } });
+    expect('点赞页：切到另一场会带上 sessionId 重新拉票',
+      pickCtx.calls.length === 1 && pickCtx.calls[0].id === 's2' && pickCtx.calls[0].silent === true,
+      JSON.stringify(pickCtx.calls));
+
+    /* 场次标签的渲染（我参加过的 + 当前场次） */
+    const sessCtx = {
+      data: {
+        dinners: [
+          { sessionId: 's2', no: 2, name: '中秋家宴', current: true, voted: false },
+          { sessionId: 'party', no: 1, name: '周末家宴', current: false, voted: true }
+        ],
+        voteSessionId: 'party'
+      },
+      setData(d) {
+        Object.assign(this.data, d);
+      }
+    };
+    expect('点赞页：场次标签带唯一 key（sessionId）',
+      new Set(sessCtx.data.dinners.map((d) => d.sessionId)).size === 2);
+    expect('点赞页：默认选中"我参加过的某一场"时能标出已投', sessCtx.data.dinners[1].voted === true);
   }
 
   if (loaded.dashboard) {

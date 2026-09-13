@@ -67,22 +67,38 @@
     </block>
   </view>
 
-  <!-- 点赞：吃完给今晚的菜投票，每人最多 3 道（不受点单截止影响） -->
+  <!-- 点赞：按场次投票，每人每场最多 3 道（不受点单截止影响） -->
   <view class="like" wx:if="{{inited}}">
     <view class="like-head" bindtap="onToggleLike">
-      <text class="like-title">👍 给今晚的菜点个赞</text>
-      <text class="like-meta">{{voterCount}} 人参与 · 最多 {{maxVotes}} 道 {{likeOpen ? '收起 ▲' : '展开 ▼'}}</text>
+      <text class="like-title">👍 给家宴的菜点个赞</text>
+      <text class="like-meta">{{voterCount}} 人参与 · 每场最多 {{maxVotes}} 道 {{likeOpen ? '收起 ▲' : '展开 ▼'}}</text>
     </view>
 
-    <view class="like-mine" wx:if="{{myVoteText}}">你已经赞过：{{myVoteText}}</view>
-
     <block wx:if="{{likeOpen}}">
+      <!-- 我参加过的场次：可以回到某一次去补投/改票 -->
+      <scroll-view class="like-sessions" scroll-x wx:if="{{dinners.length > 1}}">
+        <view
+          class="like-session {{item.sessionId === voteSessionId ? 'like-session-on' : ''}}"
+          wx:for="{{dinners}}"
+          wx:key="sessionId"
+          data-id="{{item.sessionId}}"
+          bindtap="onPickSession"
+        >
+          <text>{{item.name}}</text>
+          <text class="like-session-mark" wx:if="{{item.voted}}">已投 ✓</text>
+          <text class="like-session-mark" wx:elif="{{item.current}}">进行中</text>
+        </view>
+      </scroll-view>
+
       <view class="like-tip">
-        吃完啦？挑最多 {{maxVotes}} 道你觉得最好吃的（已选 {{pickCount}}/{{maxVotes}}）。主人下次家宴就知道该做什么了。
+        <block wx:if="{{isCurrentVote}}">挑最多 {{maxVotes}} 道你觉得最好吃的（已选 {{pickCount}}/{{maxVotes}}）。主人下次家宴就知道该做什么了。</block>
+        <block wx:else>这是「{{voteSession.name}}」那一场的菜单。改完记得点提交，只影响这一场。</block>
       </view>
 
+      <view class="like-mine" wx:if="{{myVoteText}}">你在这一场赞过：{{myVoteText}}</view>
+
       <view class="like-empty" wx:if="{{!voteList.length}}">
-        今晚还没有人点菜，等大家点完再来投票吧。
+        这一场还没有人点菜，等大家点完再来投票吧。
       </view>
 
       <view
@@ -95,16 +111,16 @@
         <text class="like-emoji">{{item.emoji}}</text>
         <view class="like-main">
           <view class="like-name">{{item.name}}</view>
-          <view class="like-sub">{{item.ordered ? '今晚点了 ×' + item.qty : '菜单上的菜'}}<text wx:if="{{item.likeCount}}"> · 已有 {{item.likeCount}} 人赞</text></view>
+          <view class="like-sub">{{item.ordered ? '这一场点了 ×' + item.qty : '菜单上的菜'}}<text wx:if="{{item.likeCount}}"> · 本场 {{item.likeCount}} 人赞</text></view>
         </view>
         <view class="like-box {{item.picked ? 'like-box-on' : ''}}">{{item.picked ? '✓' : ''}}</view>
       </view>
 
       <view class="like-actions">
-        <view class="btn btn-ghost" wx:if="{{myVotes.length}}" bindtap="onClearVotes">撤销我的赞</view>
+        <view class="btn btn-ghost" wx:if="{{myVotes.length}}" bindtap="onClearVotes">撤销这一场的</view>
         <view class="btn btn-primary" bindtap="onSubmitVotes">提交点赞（{{pickCount}}/{{maxVotes}}）</view>
       </view>
-      <view class="like-note">可以随时改，重新提交会覆盖上一次。</view>
+      <view class="like-note">每场一人一票，同一场重新提交会覆盖上一次；去过好几场的话，每场都能投。</view>
     </block>
   </view>
 
