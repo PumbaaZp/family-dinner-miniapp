@@ -251,8 +251,33 @@ wxmlFiles.forEach((f) => {
   }
 });
 
-/* ---------------- 8. input 垂直对齐防护 ---------------- */
-console.log('\n[8] input 垂直对齐防护（原生组件不能用垂直 padding）');
+console.log('\n[7.6] 按钮放在它真正影响的那一块下面');
+
+/**
+ * 「清空本场点赞」必须排在「累计榜（跨场次）」**前面**。
+ *
+ * 为什么值得写成检查：这个按钮只清**正在看的那一场**，而累计榜是跨场次加出来的。
+ * 按钮排在累计榜底下时，主人会以为它连累计票一起清掉（真被这么问过：
+ * 「清空本场点赞按钮在累计榜下面，是不是不太对」）。
+ * 按钮位置属于"只有肉眼才看得出来的语义"，所以拿静态检查兜住。
+ */
+{
+  const file = path.join(ROOT, 'miniprogram/pages/admin/dashboard/dashboard.wxml');
+  const src = fs.readFileSync(file, 'utf8');
+  const atBtn = src.indexOf('onResetVotes');
+  const atAll = src.indexOf('累计榜（跨场次）');
+  if (atBtn < 0) {
+    bad('看板里找不到「清空点赞」按钮（onResetVotes）');
+  } else if (atAll < 0) {
+    bad('看板里找不到「累计榜（跨场次）」标题');
+  } else if (atBtn > atAll) {
+    bad('「清空本场点赞」排到了累计榜下面：它只清这一场，摆在跨场次的累计榜底下会被误解成"连累计票一起清"');
+  } else {
+    ok('「清空本场点赞」在本场榜里、累计榜之前（不会被误解成清累计票）');
+  }
+}
+
+/* ---------------- 8. input 垂直对齐防护 ---------------- */console.log('\n[8] input 垂直对齐防护（原生组件不能用垂直 padding）');
 
 // WXML 里所有 <input> 用到的 class（用上面的 scanTags，避免被 {{a > b}} 里的 > 截断）
 const inputClasses = new Set();

@@ -171,6 +171,14 @@
         </view>
       </view>
       <view class="lk-miss" wx:if="{{likeStats.notVotedText}}">还没投的：{{likeStats.notVotedText}}</view>
+
+      <!-- 清空按钮紧跟在「本场榜」后面，**不能放到累计榜下面**：
+           累计榜是跨场次的，按钮摆在它下面会让人以为连累计票一起清（真被这么问过）。
+           按钮也只在这一场真的有票时才出现，没票时不显示。 -->
+      <view class="lk-ops">
+        <view class="btn btn-danger btn-mini" bindtap="onResetVotes">{{isCurrentView ? '清空本场点赞' : '清空这一场的点赞'}}</view>
+      </view>
+      <view class="hint">只清这一场（{{sessionText}}）的票：历史场次的票和累计榜不受影响。</view>
     </block>
     <view class="hint" wx:else>{{isCurrentView ? '本场还没人点赞。把小程序发群里，让朋友吃完来投一票。' : '这一场没有人点赞。'}}</view>
 
@@ -181,6 +189,7 @@
       <text class="muted">{{likeStats.votersAll}} 人次</text>
     </view>
     <view class="hint">去过几次就投几次票——"来过三次都说好"比单场第一更有说服力。名字后面带 ×N 表示他赞过 N 次。下次挑菜看这张。</view>
+    <view class="hint">这张表是各场的票加出来的，没法直接清：要让某道菜的累计票变少，就切到对应那一场去清（上面那个按钮）。</view>
 
     <view class="lk" wx:for="{{likesAll}}" wx:key="key">
       <text class="lk-rank">{{item.medal || item.rank}}</text>
@@ -193,11 +202,6 @@
         <view class="lk-bar"><view class="lk-bar-in" style="width:{{item.barPercent}}%"></view></view>
         <view class="lk-who" wx:if="{{item.whoText}}">{{item.whoText}}</view>
       </view>
-    </view>
-
-    <view class="actions" style="margin-top:22rpx">
-      <!-- 名字跟着"正在看哪一场"变：免得在看历史场次时以为清的是当前这一场 -->
-      <view class="btn" bindtap="onResetVotes">{{isCurrentView ? '清空本场点赞' : '清空这一场的点赞'}}</view>
     </view>
   </view>
 

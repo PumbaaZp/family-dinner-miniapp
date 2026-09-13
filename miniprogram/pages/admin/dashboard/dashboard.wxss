@@ -214,6 +214,13 @@
   line-height: 1.5;
 }
 
+/* 「清空这一场的点赞」：紧跟本场榜、靠右的小按钮（别做成一整条主按钮） */
+.lk-ops {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 18rpx;
+}
+
 
 /* 状态条上的入口（"开始新的一场家宴"） */
 .hero-links {
@@ -472,10 +479,6 @@
   display: flex;
   gap: 16rpx;
   margin-top: 22rpx;
-}
-
-.actions .btn {
-  flex: 1;
 }
 
 .loading {
