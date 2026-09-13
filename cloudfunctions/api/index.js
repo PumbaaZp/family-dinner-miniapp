@@ -4,7 +4,7 @@
  * 为什么要"一个云函数"：部署时只需要右键上传一个函数，
  * 不用逐个部署 6 个函数，减少出错点。
  *
- * 数据库集合：dishes（菜库）、orders（点单）、config（家宴配置）
+ * 数据库集合：dishes（菜库）、orders（点单）、config（家宴配置）、votes（点赞）
  * 全部读写都走云函数，因此**不需要在云开发控制台配置任何集合权限**。
  *
  * 家里的「库存」（有哪些食材/调料）也存在 config 文档的 pantry 字段里，
@@ -17,9 +17,12 @@ cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 const db = cloud.database();
 const _ = db.command;
 
-const COLLECTIONS = ['dishes', 'orders', 'config'];
+const COLLECTIONS = ['dishes', 'orders', 'config', 'votes'];
 const PARTY_ID = 'party';
 const MAX_LIMIT = 500;
+
+/** 每人最多给几道菜点赞 */
+const MAX_VOTES = 3;
 
 /** 库存分类：固定三种，前端筛选/分组都按这个顺序 */
 const PANTRY_CATS = ['食材', '调料', '其他'];
@@ -56,6 +59,35 @@ async function ensureCollections() {
     }
   }
   return created;
+}
+
+/** 集合不存在（-502005）还是别的错？ */
+function isCollectionMissing(e) {
+  if (!e) return false;
+  const code = String(e.errCode === undefined || e.errCode === null ? '' : e.errCode);
+  const msg = String(e.errMsg || e.message || '');
+  return code === '-502005' || /collection not exists|COLLECTION_NOT_EXIST/i.test(msg);
+}
+
+/**
+ * 集合不存在就补建一次再重试。
+ *
+ * 为什么需要：votes 是后来才加的集合，**老环境里没有**——而 ensureCollections 只在
+ * 「开通家宴」（init）时跑一次，已经初始化过的环境不会重新执行它。
+ * 不兜住的话，老环境里第一次点赞会直接报「collection not exists」。
+ */
+async function withCollection(name, fn) {
+  try {
+    return await fn();
+  } catch (e) {
+    if (!isCollectionMissing(e)) throw e;
+    try {
+      await db.createCollection(name);
+    } catch (e2) {
+      /* 并发下可能已被创建，忽略 */
+    }
+    return await fn();
+  }
 }
 
 async function getConfig() {
@@ -485,7 +517,7 @@ async function handleCancelOrder(openid) {
  * 差别只在 withOrderId：订单 id 只给主人端，朋友端拿不到（去掉菜品的接口本来也要口令，
  * 但没必要把内部 id 发给所有人）。
  */
-function aggregateOrders(cfg, orderDocs, dishDocs, withOrderId) {
+function aggregateOrders(cfg, orderDocs, dishDocs, withOrderId, likeMap) {
   const orders = (orderDocs || []).map((o) => {
     const one = {
       nick: o.nick || '匿名朋友',
@@ -534,6 +566,11 @@ function aggregateOrders(cfg, orderDocs, dishDocs, withOrderId) {
   const dishTotals = Object.keys(totals)
     .map((k) => totals[k])
     .sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name));
+
+  // 每道菜带上"多少人点赞"（没有点赞记录就是 0，不是 undefined，前端不用再判空）
+  dishTotals.forEach((t) => {
+    t.likeCount = (likeMap && likeMap[t.dishId]) || 0;
+  });
 
   return {
     orders,
@@ -713,16 +750,230 @@ async function handleClearPantry(openid) {
   return ok({ cleared: cleared });
 }
 
+/* ------------------------------ 点赞（这道菜好不好吃） ------------------------------ */
+
+/**
+ * 读全部投票。
+ * 集合还不存在（老环境没建过 votes）时当作「还没人投票」，而不是报错——
+ * 买菜清单、后厨看板都不该因为一个附加功能没建集合就整页挂掉。
+ */
+async function readVotes() {
+  try {
+    const res = await db.collection('votes').limit(MAX_LIMIT).get();
+    return res.data || [];
+  } catch (e) {
+    if (isCollectionMissing(e)) return [];
+    throw e;
+  }
+}
+
+/**
+ * 点赞汇总 → [{ dishId, name, emoji, count }]，按人数降序。
+ *
+ * 一人一份票（重复提交即覆盖自己的），所以 count 就是「有多少人推荐这道菜」，
+ * 同一个人反复来吃也不会把票数刷上去——这比累计历史点赞更适合当"下次点什么"的参考。
+ */
+function buildLikeTotals(voteDocs, dishDocs) {
+  const dishMap = {};
+  (dishDocs || []).forEach((d) => {
+    dishMap[d._id] = d;
+  });
+
+  const index = {};
+  (voteDocs || []).forEach((v) => {
+    (v.items || []).forEach((it) => {
+      if (!it || !it.dishId) return;
+      if (!index[it.dishId]) {
+        const dish = dishMap[it.dishId] || {};
+        index[it.dishId] = {
+          dishId: it.dishId,
+          // 菜被删了也保留当时记下的名字（跟订单汇总同一个口径，不丢历史）
+          name: dish.name || it.name || '已删除的菜',
+          emoji: dish.emoji || it.emoji || '🍽',
+          count: 0
+        };
+      }
+      index[it.dishId].count += 1;
+    });
+  });
+
+  return Object.keys(index)
+    .map((k) => index[k])
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
+/** [{ dishId, count }] → { dishId: count }，给菜品行直接取用 */
+function likeMapOf(totals) {
+  const m = {};
+  (totals || []).forEach((t) => {
+    m[t.dishId] = t.count;
+  });
+  return m;
+}
+
+/**
+ * 点赞的候选名单：今晚真正吃到的菜。
+ *
+ * 取 = 订单里出现过的菜（已按份数排序） ∪ 已上架的菜。
+ * 为什么连"已下架但点过"的也算：家宴一结束，主人常把菜一键全部下架，
+ * 那时候朋友端菜单是空的——可恰恰是这时候大家才来点赞。
+ */
+function buildBallot(orderDocs, dishDocs, likeMap) {
+  const dishMap = {};
+  (dishDocs || []).forEach((d) => {
+    dishMap[d._id] = d;
+  });
+
+  const qtyOf = {};
+  (orderDocs || []).forEach((o) => {
+    (o.items || []).forEach((i) => {
+      qtyOf[i.dishId] = (qtyOf[i.dishId] || 0) + (Number(i.qty) || 0);
+    });
+  });
+
+  const seen = {};
+  const list = [];
+  const push = (dishId, fallbackName) => {
+    if (!dishId || seen[dishId]) return;
+    seen[dishId] = true;
+    const dish = dishMap[dishId] || {};
+    list.push({
+      dishId: dishId,
+      name: dish.name || fallbackName || '已删除的菜',
+      emoji: dish.emoji || '🍽',
+      qty: qtyOf[dishId] || 0,
+      ordered: !!qtyOf[dishId],
+      likeCount: (likeMap && likeMap[dishId]) || 0
+    });
+  };
+
+  // 点过的先列（按份数从多到少），没点过的上架菜跟在后面
+  (orderDocs || []).forEach((o) => {
+    (o.items || []).forEach((i) => push(i.dishId, i.name));
+  });
+  list.sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name));
+  (dishDocs || []).forEach((d) => {
+    if (d.available) push(d._id, d.name);
+  });
+
+  return list;
+}
+
+/**
+ * 看看点赞情况（不需要口令，任何朋友都能看）
+ *
+ * 一次返回三样，朋友端不用再发第二个请求：
+ *   candidates 今晚的菜（投票候选）+ myVotes 我投了哪些 + 合计人数
+ * 刻意只返回菜名和人数，不带别人的 openid。
+ */
+async function handleVotes(openid) {
+  const [votes, dishRes, orderRes] = await Promise.all([
+    readVotes(),
+    db.collection('dishes').limit(MAX_LIMIT).get(),
+    db.collection('orders').orderBy('createdAt', 'asc').limit(MAX_LIMIT).get()
+  ]);
+  const mine = votes.filter((v) => v._openid === openid)[0];
+  const totals = buildLikeTotals(votes, dishRes.data);
+
+  return ok({
+    myVotes: mine ? (mine.items || []).map((i) => i.dishId) : [],
+    myVoteNames: mine ? (mine.items || []).map((i) => i.name) : [],
+    candidates: buildBallot(orderRes.data, dishRes.data, likeMapOf(totals)),
+    totals: totals,
+    likeMap: likeMapOf(totals),
+    voterCount: votes.length,
+    maxVotes: MAX_VOTES
+  });
+}
+
+/**
+ * 提交点赞：从菜单里挑最多 3 道菜。
+ *
+ * 几点刻意的设计：
+ *   - **不受点单截止时间限制**：点赞本来就是吃完才做的事，截止后才是投票高峰。
+ *   - **重复提交即覆盖**：跟点单一样，改主意了直接重交，不需要先撤销。
+ *   - **传空数组 = 撤销我的赞**：不报错（幂等），方便"点错了想全撤"。
+ *   - **只认菜库里真实存在的菜**：已下架的菜照样能点赞（家宴结束后主人常把菜下架），
+ *     但菜库里删掉的菜就投不了，避免刷出一堆幽灵条目。
+ */
+async function handleSubmitVotes(openid, event) {
+  const cfg = await getConfig();
+  if (!cfg) throw new Error('家宴还没初始化，请等主人开通');
+
+  const raw = Array.isArray(event.dishIds) ? event.dishIds : [];
+
+  const dishRes = await db.collection('dishes').limit(MAX_LIMIT).get();
+  const byId = {};
+  (dishRes.data || []).forEach((d) => {
+    byId[d._id] = d;
+  });
+
+  const items = [];
+  for (const r of raw) {
+    const id = str(r, 64);
+    if (!id || !byId[id]) continue; // 不存在 / 空值：跳过
+    if (items.some((it) => it.dishId === id)) continue; // 同一道菜只算一票
+    items.push({ dishId: id, name: byId[id].name, emoji: byId[id].emoji || '🍽' });
+  }
+
+  // 注意：先去掉重复和无效应答再判上限。
+  // 否则客户端传了 [A, B, C, A] 这种带重复的数组，会被误判成"投了 4 道"而拒绝。
+  if (items.length > MAX_VOTES) throw new Error('最多只能给 ' + MAX_VOTES + ' 道菜点赞');
+
+  const mine = await withCollection('votes', () => db.collection('votes').where({ _openid: openid }).limit(1).get());
+  const existed = !!(mine.data && mine.data.length);
+
+  if (!items.length) {
+    if (existed) {
+      await withCollection('votes', () => db.collection('votes').doc(mine.data[0]._id).remove());
+    }
+    return ok({ cleared: true, count: 0, dishIds: [] });
+  }
+
+  const doc = { _openid: openid, items: items, updatedAt: db.serverDate() };
+  if (existed) {
+    await withCollection('votes', () => db.collection('votes').doc(mine.data[0]._id).update({ data: doc }));
+  } else {
+    doc.createdAt = db.serverDate();
+    await withCollection('votes', () => db.collection('votes').add({ data: doc }));
+  }
+
+  return ok({
+    cleared: false,
+    count: items.length,
+    dishIds: items.map((i) => i.dishId),
+    names: items.map((i) => i.name),
+    maxVotes: MAX_VOTES
+  });
+}
+
+/** 清空所有点赞（主人用：换季/试完想重来） */
+async function handleResetVotes(openid) {
+  await requireAdmin(openid);
+  const votes = await readVotes();
+  if (!votes.length) return ok({ cleared: 0 });
+
+  // 逐条删：比 where().remove() 稳妥，也不受单次删除上限影响
+  for (let i = 0; i < votes.length; i += 20) {
+    await Promise.all(
+      votes.slice(i, i + 20).map((v) => withCollection('votes', () => db.collection('votes').doc(v._id).remove()))
+    );
+  }
+  return ok({ cleared: votes.length });
+}
+
 /** 后厨看板汇总（仅主人） */
 async function handleSummary(openid) {
   await requireAdmin(openid);
   const cfg = await getConfig();
-  const [orderRes, dishRes] = await Promise.all([
+  const [orderRes, dishRes, votes] = await Promise.all([
     db.collection('orders').orderBy('createdAt', 'asc').limit(MAX_LIMIT).get(),
-    db.collection('dishes').limit(MAX_LIMIT).get()
+    db.collection('dishes').limit(MAX_LIMIT).get(),
+    readVotes()
   ]);
 
-  const data = aggregateOrders(cfg, orderRes.data, dishRes.data, true);
+  const likes = buildLikeTotals(votes, dishRes.data);
+  const data = aggregateOrders(cfg, orderRes.data, dishRes.data, true, likeMapOf(likes));
   const ingredients = buildIngredients(dishRes.data, orderRes.data, cfg.shopping || {}, cfg.pantry || {});
   const pantry = pantryList(cfg);
 
@@ -735,6 +986,8 @@ async function handleSummary(openid) {
     Object.assign({ config: publicConfig(cfg, true) }, data, {
       ingredients: ingredients,
       pantry: pantry,
+      likes: likes,
+      likeStats: { voters: votes.length, likedDishes: likes.length, maxVotes: MAX_VOTES },
       ingredientStats: {
         total: ingredients.length,
         missing: missing,
@@ -776,15 +1029,17 @@ async function handleResetShopping(openid) {
  */
 async function handleBoard() {
   const cfg = await getConfig();
-  if (!cfg) return ok({ inited: false, orders: [], dishTotals: [], stats: { orderCount: 0, totalPeople: 0, totalDishes: 0, dishKindCount: 0 } });
+  if (!cfg) return ok({ inited: false, orders: [], dishTotals: [], likes: [], stats: { orderCount: 0, totalPeople: 0, totalDishes: 0, dishKindCount: 0 } });
 
-  const [orderRes, dishRes] = await Promise.all([
+  const [orderRes, dishRes, votes] = await Promise.all([
     db.collection('orders').orderBy('createdAt', 'asc').limit(MAX_LIMIT).get(),
-    db.collection('dishes').limit(MAX_LIMIT).get()
+    db.collection('dishes').limit(MAX_LIMIT).get(),
+    readVotes()
   ]);
 
-  const data = aggregateOrders(cfg, orderRes.data, dishRes.data, false);
-  return ok(Object.assign({ inited: true, config: publicConfig(cfg, false) }, data));
+  const likes = buildLikeTotals(votes, dishRes.data);
+  const data = aggregateOrders(cfg, orderRes.data, dishRes.data, false, likeMapOf(likes));
+  return ok(Object.assign({ inited: true, config: publicConfig(cfg, false), likes: likes, voterCount: votes.length }, data));
 }
 
 /**
@@ -977,6 +1232,12 @@ exports.main = async (event) => {
         return await handleRemovePantryItem(openid, event);
       case 'clearPantry':
         return await handleClearPantry(openid);
+      case 'votes':
+        return await handleVotes(openid);
+      case 'submitVotes':
+        return await handleSubmitVotes(openid, event);
+      case 'resetVotes':
+        return await handleResetVotes(openid);
       default:
         return fail('未知操作：' + action);
     }

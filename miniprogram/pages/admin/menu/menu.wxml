@@ -74,6 +74,10 @@
       还没记库存：去「家里的库存」点几下（菜谱里的食材可以直接点选），这里就会标出每道菜「食材都有 / 缺几样」。
     </view>
 
+    <view class="muted" style="margin-top:14rpx" wx:if="{{likedDishCount}}">
+      上次家宴客人点赞了 {{likedDishCount}} 道菜，最受欢迎：{{topLikes}}（菜名后面的 👍N 就是票数）
+    </view>
+
     <view class="actions" style="margin-top:16rpx">
       <view class="btn btn-ghost" bindtap="goPantry">🧺 管理库存</view>
     </view>
@@ -104,12 +108,12 @@
       <view class="drow-main">
         <view class="drow-name">{{d.name}}</view>
         <view class="drow-desc">{{d.desc}}</view>
-        <view
-          class="drow-ing {{d.haveFull ? 'drow-ing-ok' : ''}}"
+        <view class="drow-ing {{d.haveFull ? 'drow-ing-ok' : ''}}"
           wx:if="{{d.haveShort}}"
           data-id="{{d._id}}"
           catchtap="onShowCoverage"
         >{{d.haveFull ? '✅ ' : '🧺 '}}{{d.haveShort}}</view>
+        <text class="drow-like" wx:if="{{d.likeText}}">{{d.likeText}}</text>
       </view>
       <view class="drow-limit">
         <input

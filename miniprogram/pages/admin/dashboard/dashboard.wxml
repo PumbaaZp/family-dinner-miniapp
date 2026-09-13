@@ -44,6 +44,7 @@
         <view class="dt-name">
           {{item.name}}
           <text class="dt-limit" wx:if="{{item.limitText}}">{{item.limitText}}</text>
+          <text class="dt-like" wx:if="{{item.likeText}}">{{item.likeText}}</text>
         </view>
         <view class="dt-guests" wx:if="{{item.guestsText}}">{{item.guestsText}}</view>
         <view class="dt-note" wx:for="{{item.notes}}" wx:for-item="n" wx:key="*this">↳ {{n}}</view>
@@ -121,6 +122,31 @@
     <view class="empty" wx:if="{{!loading && !orders.length}}">
       <text class="empty-emoji">📭</text>
       <view>暂无点单记录</view>
+    </view>
+  </view>
+
+  <!-- 客人的点赞榜：吃完的反馈，下次家宴照着这张榜挑菜 -->
+  <view class="card" wx:if="{{likes.length}}">
+    <view class="card-title">
+      <text>👍 点赞榜（客人吃完投的）</text>
+      <text class="muted">{{likeStats.voters}} 人参与</text>
+    </view>
+    <view class="hint">一人最多投 3 道，重复提交会覆盖。下次家宴挑菜时，照这张榜来最不容易翻车。</view>
+
+    <view class="lk" wx:for="{{likes}}" wx:key="key">
+      <text class="lk-rank">{{item.medal || item.rank}}</text>
+      <text class="lk-emoji">{{item.emoji}}</text>
+      <view class="lk-main">
+        <view class="lk-line">
+          <text class="lk-name">{{item.name}}</text>
+          <text class="lk-count">{{item.count}} 人赞</text>
+        </view>
+        <view class="lk-bar"><view class="lk-bar-in" style="width:{{item.barPercent}}%"></view></view>
+      </view>
+    </view>
+
+    <view class="actions" style="margin-top:22rpx">
+      <view class="btn" bindtap="onResetVotes">清空点赞</view>
     </view>
   </view>
 

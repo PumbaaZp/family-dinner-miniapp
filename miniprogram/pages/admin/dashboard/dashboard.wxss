@@ -170,6 +170,80 @@
   margin: -6rpx 0 14rpx;
 }
 
+/* ============ 点赞榜 ============ */
+
+.lk {
+  display: flex;
+  align-items: center;
+  padding: 16rpx 0;
+  border-bottom: 2rpx solid #f7f3ee;
+}
+
+.lk:last-child {
+  border-bottom: none;
+}
+
+.lk-rank {
+  width: 52rpx;
+  flex: none;
+  text-align: center;
+  font-size: 26rpx;
+  color: #b06a3c;
+}
+
+.lk-emoji {
+  width: 52rpx;
+  flex: none;
+  text-align: center;
+  font-size: 34rpx;
+}
+
+.lk-main {
+  flex: 1;
+  min-width: 0;
+  padding-left: 8rpx;
+}
+
+.lk-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lk-name {
+  font-size: 28rpx;
+  font-weight: 600;
+}
+
+.lk-count {
+  font-size: 23rpx;
+  color: #2e7d5b;
+}
+
+.lk-bar {
+  margin-top: 10rpx;
+  height: 12rpx;
+  background: #f2ece5;
+  border-radius: 999rpx;
+  overflow: hidden;
+}
+
+.lk-bar-in {
+  height: 12rpx;
+  background: linear-gradient(90deg, #6fbf95 0%, #2e7d5b 100%);
+  border-radius: 999rpx;
+}
+
+/* 菜品行上的 👍N */
+.dt-like {
+  font-size: 20rpx;
+  color: #2e7d5b;
+  background: #eaf6f0;
+  border-radius: 8rpx;
+  padding: 2rpx 10rpx;
+  margin-left: 8rpx;
+}
+
 /* 还要买 / 已买 / 家里有 三个数，一眼看清清单构成 */
 .ing-split {
   display: flex;

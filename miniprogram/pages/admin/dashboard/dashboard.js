@@ -26,6 +26,9 @@ Page({
     // 食材清单（含"是否已采购 / 家里有没有"）+ 统计
     ingredients: [],
     ingredientStats: { total: 0, missing: 0, purchased: 0, inStock: 0, pantryCount: 0 },
+    // 客人的点赞（吃完的反馈，下次菜单的参考）
+    likes: [],
+    likeStats: { voters: 0, likedDishes: 0 },
     // 三种导出的文本，load 时生成好，点按钮直接复制
     menuText: '',
     dishIngText: '',
@@ -103,6 +106,8 @@ Page({
         qty: t.qty,
         limit: t.limit,
         ingredients: t.ingredients || [],
+        likeCount: Number(t.likeCount) || 0,
+        likeText: t.likeCount ? '👍 ' + t.likeCount : '',
         limitText: t.limit ? '限 ' + t.limit + ' 份' : '',
         guestsText: (t.guests || []).join('、'),
         notes: t.notes || []
@@ -120,6 +125,8 @@ Page({
         dishTotals,
         orders,
         hasHostOrder: orders.some((o) => o.isHost),
+        likes: this.mapLikes(res.likes),
+        likeStats: res.likeStats || { voters: 0, likedDishes: 0 },
         ingredientStats: res.ingredientStats || { total: 0, missing: 0, purchased: 0, inStock: 0, pantryCount: 0 },
         deadlineText: deadlineTs ? fmt.fmtShort(deadlineTs) + '（' + fmt.countdown(deadlineTs) + '）' : '不限时间',
         closed: !!(deadlineTs && Date.now() > deadlineTs),
@@ -197,6 +204,22 @@ Page({
         dishesText: (i.dishes || []).join('、')
       };
     });
+  },
+
+  /** 点赞榜 → 渲染数据（前几名给个名次，方便下次照着做） */
+  mapLikes(rawList) {
+    const total = (rawList || []).length;
+    return (rawList || []).map((l, idx) => ({
+      key: 'like:' + l.dishId,
+      rank: idx + 1,
+      dishId: l.dishId,
+      name: l.name,
+      emoji: l.emoji || '🍽',
+      count: Number(l.count) || 0,
+      medal: idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '',
+      // 第一名的条给满宽，其余按比例——一眼看出差距，也不用 canvas
+      barPercent: total ? Math.round((Number(l.count) || 0) / (Number(rawList[0].count) || 1) * 100) : 0
+    }));
   },
 
   /** 把菜品按分类分组（三种导出都用得上） */
@@ -369,6 +392,23 @@ Page({
       this._ingSig = '';
       await this.load({ silent: true });
       api.toast('已清空勾选');
+    } catch (err) {
+      api.hideLoading();
+      api.toastErr(err);
+    }
+  },
+
+  /** 清空所有点赞（比如测试时投过、或想重新收集一轮） */
+  async onResetVotes() {
+    const n = this.data.likeStats.voters || 0;
+    const ok = await api.confirm('清空全部点赞？\n\n' + n + ' 个人的投票会被删掉，菜库和订单不受影响。');
+    if (!ok) return;
+    api.loading('处理中');
+    try {
+      const res = await api.call('resetVotes');
+      api.hideLoading();
+      await this.load({ silent: true });
+      api.toast('已清空 ' + res.cleared + ' 人的点赞');
     } catch (err) {
       api.hideLoading();
       api.toastErr(err);

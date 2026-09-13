@@ -106,6 +106,18 @@
   background: #eaf6f0;
 }
 
+/* 客人点赞数：挑下次菜单时的参考 */
+.drow-like {
+  display: inline-block;
+  font-size: 20rpx;
+  color: #2e7d5b;
+  background: #eaf6f0;
+  border-radius: 8rpx;
+  padding: 4rpx 12rpx;
+  margin-top: 8rpx;
+  margin-left: 10rpx;
+}
+
 .drow-limit {
   display: flex;
   align-items: center;

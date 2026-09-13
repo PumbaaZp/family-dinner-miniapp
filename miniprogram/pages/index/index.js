@@ -34,7 +34,18 @@ Page({
     boardOpen: false,
     boardTotals: [],
     boardOrders: [],
-    boardStats: { orderCount: 0, totalPeople: 0, totalDishes: 0 }
+    boardStats: { orderCount: 0, totalPeople: 0, totalDishes: 0 },
+
+    // 点赞（吃完给今晚的菜投票，每人最多 maxVotes 道）
+    likeOpen: false,
+    voteCandidates: [],
+    voteList: [],
+    myVotes: [],
+    myVoteText: '',
+    voterCount: 0,
+    maxVotes: 3,
+    pickCount: 0,
+    likeMap: {}
   },
 
   onLoad() {
@@ -198,6 +209,7 @@ Page({
       emoji: t.emoji || '🍽',
       name: t.name,
       qty: t.qty,
+      likeText: t.likeCount ? '👍 ' + t.likeCount : '',
       guestsText: (t.guests || []).join('、')
     }));
     const orders = (res.orders || []).map((o, idx) => ({
@@ -227,6 +239,94 @@ Page({
     }
   },
 
+  /* -------------------- 点赞（吃完给今晚的菜投票） -------------------- */
+
+  onToggleLike() {
+    const likeOpen = !this.data.likeOpen;
+    this.setData({ likeOpen });
+    if (likeOpen) this.loadVotes(true); // 展开时刷新，看到最新的"几人推荐"
+  },
+
+  /**
+   * 点赞数据一次拿全：候选菜（今晚点过的 ∪ 上架的）+ 我投了哪些 + 合计人数。
+   *
+   * 注意这个卡片**不受点单截止时间影响**：点赞本来就是吃完才做的事，
+   * 截止之后（甚至主人都把菜下架了）才是投票高峰。
+   */
+  async loadVotes(silent) {
+    try {
+      const res = await api.call('votes');
+      const maxVotes = Number(res.maxVotes) || 3;
+      this.pickVotes = (res.myVotes || []).slice(0, maxVotes);
+      this.setData({
+        voteCandidates: res.candidates || [],
+        myVotes: res.myVotes || [],
+        myVoteText: (res.myVoteNames || []).join('、'),
+        voterCount: Number(res.voterCount) || 0,
+        maxVotes: maxVotes,
+        likeMap: res.likeMap || {}
+      });
+      this.buildVoteList();
+      if (this.data.dishes.length) this.buildShown(); // 菜品行上的 👍N 要跟着刷新
+    } catch (err) {
+      if (!silent) api.toastErr(err);
+    }
+  },
+
+  /** 候选菜 + 当前勾选 → 渲染列表 */
+  buildVoteList() {
+    const picked = this.pickVotes || [];
+    const list = (this.data.voteCandidates || []).map((c) =>
+      Object.assign({}, c, { picked: picked.indexOf(c.dishId) >= 0 })
+    );
+    this.setData({ voteList: list, pickCount: picked.length });
+  },
+
+  onTapVote(e) {
+    const id = e.currentTarget.dataset.id;
+    const max = this.data.maxVotes || 3;
+    const pick = (this.pickVotes || []).slice();
+    const at = pick.indexOf(id);
+    if (at >= 0) {
+      pick.splice(at, 1);
+    } else {
+      if (pick.length >= max) return api.toast('最多给 ' + max + ' 道菜点赞，先取消一个吧');
+      pick.push(id);
+    }
+    this.pickVotes = pick;
+    this.buildVoteList();
+  },
+
+  async onSubmitVotes() {
+    const pick = this.pickVotes || [];
+    if (!pick.length) return api.toast('先点几道你觉得好吃的菜');
+    api.loading('提交中');
+    try {
+      const res = await api.call('submitVotes', { dishIds: pick });
+      api.hideLoading();
+      await this.loadVotes(true);
+      api.toast('谢谢！已给 ' + res.count + ' 道菜点赞', 'success');
+    } catch (err) {
+      api.hideLoading();
+      api.toastErr(err);
+    }
+  },
+
+  async onClearVotes() {
+    const ok = await api.confirm('撤销我点的赞？');
+    if (!ok) return;
+    api.loading('处理中');
+    try {
+      await api.call('submitVotes', { dishIds: [] });
+      api.hideLoading();
+      await this.loadVotes(true);
+      api.toast('已撤销');
+    } catch (err) {
+      api.hideLoading();
+      api.toastErr(err);
+    }
+  },
+
   /* -------------------- 数据加载 -------------------- */
 
   async bootstrap(force) {
@@ -250,6 +350,7 @@ Page({
       this.setData({ inited: true, dishes, cats, viewCat: '全部', loading: false });
       this._loaded = true;
       this.startDeadlineTick();
+      this.loadVotes(true); // 菜品行上的 👍N：失败也不打扰朋友（静默）
 
       if (mineRes.order) {
         this.fillFromOrder(mineRes.order);
@@ -328,6 +429,8 @@ Page({
       category: d.category,
       tags: d.tags || [],
       limit: d.limit,
+      // 多少人点赞（老朋友吃过都说好）——新朋友点菜时的参考
+      likeText: (this.data.likeMap || {})[d._id] ? '👍 ' + this.data.likeMap[d._id] : '',
       qty: this.cart[d._id] || 0,
       note: this.notes[d._id] || ''
     };

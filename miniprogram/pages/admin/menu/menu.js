@@ -24,7 +24,10 @@ Page({
     seedCount: SEED.length,
     // 库存概览：菜谱里的菜有几道"家里食材够做"
     pantryCount: 0,
-    canCookCount: 0
+    canCookCount: 0,
+    // 客人的点赞（挑下次菜单的参考）
+    topLikes: [],
+    likedDishCount: 0
   },
 
   onLoad() {
@@ -62,11 +65,26 @@ Page({
         pantryFailed = true;
       }
 
+      // 客人的点赞同样兜住：挑下次的菜单时，"老朋友都说好"是最有用的参考
+      let likes = [];
+      try {
+        const voteRes = await api.call('votes');
+        likes = voteRes.totals || [];
+      } catch (e) {
+        likes = [];
+      }
+      this.likeMap = {};
+      likes.forEach((l) => {
+        this.likeMap[l.dishId] = l.count;
+      });
+
       const deadlineTs = Number(cfg.deadlineTs) || 0;
       this.setData({
         loading: false,
         isAdmin: true,
         pantryCount: pantryCount,
+        topLikes: likes.slice(0, 5).map((l) => l.name + '（' + l.count + '）'),
+        likedDishCount: likes.length,
         form: {
           title: cfg.title || '',
           host: cfg.host || '',
@@ -106,12 +124,15 @@ Page({
 
     dishes.forEach((d) => {
       const cov = P.coverage(d, haveMap);
+      const likeCount = (this.likeMap || {})[d._id] || 0;
       if (cov.full) canCook += 1;
       const row = Object.assign({}, d, {
         haveShort: hasPantry ? P.coverageShort(cov) : '',
         haveFull: cov.full,
         missingCount: cov.missing.length,
-        ingTotal: cov.total
+        ingTotal: cov.total,
+        likeCount: likeCount,
+        likeText: likeCount ? '👍 ' + likeCount : ''
       });
       if (!map[d.category]) {
         map[d.category] = [];

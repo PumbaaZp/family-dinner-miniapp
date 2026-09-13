@@ -66,6 +66,157 @@
   color: #9c9089;
 }
 
+/* ============ 点赞：吃完给今晚的菜投票 ============ */
+
+.like {
+  background: #fff;
+  border-radius: 20rpx;
+  margin-top: 20rpx;
+  padding: 22rpx 24rpx;
+  box-shadow: 0 4rpx 16rpx rgba(120, 90, 70, 0.06);
+  border: 2rpx solid #f6e3d8;
+}
+
+.like-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.like-title {
+  font-size: 30rpx;
+  font-weight: 700;
+}
+
+.like-meta {
+  font-size: 22rpx;
+  color: #9c9089;
+}
+
+/* 我投过谁：一眼看到自己的状态 */
+.like-mine {
+  margin-top: 12rpx;
+  font-size: 23rpx;
+  color: #2e7d5b;
+  background: #eaf6f0;
+  border-radius: 10rpx;
+  padding: 10rpx 16rpx;
+  line-height: 1.5;
+}
+
+.like-tip {
+  margin-top: 14rpx;
+  font-size: 23rpx;
+  color: #a99d95;
+  line-height: 1.6;
+}
+
+.like-empty {
+  margin-top: 16rpx;
+  font-size: 24rpx;
+  color: #a99d95;
+  line-height: 1.6;
+}
+
+.like-row {
+  display: flex;
+  align-items: center;
+  padding: 16rpx 0;
+  border-bottom: 2rpx solid #f7f3ee;
+}
+
+.like-row:last-child {
+  border-bottom: none;
+}
+
+/* 选中态：整行淡淡变绿，配合右侧的勾，手机上一眼看出点了哪几道 */
+.like-row-on {
+  background: #f2fbf7;
+  border-radius: 12rpx;
+}
+
+.like-emoji {
+  font-size: 36rpx;
+  width: 56rpx;
+  text-align: center;
+  flex: none;
+}
+
+.like-main {
+  flex: 1;
+  min-width: 0;
+  padding-left: 8rpx;
+}
+
+.like-name {
+  font-size: 29rpx;
+  font-weight: 600;
+}
+
+.like-sub {
+  font-size: 21rpx;
+  color: #a99d95;
+  margin-top: 4rpx;
+}
+
+.like-box {
+  flex: none;
+  width: 44rpx;
+  height: 44rpx;
+  border-radius: 50%;
+  border: 2rpx solid #e0d5cb;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26rpx;
+  color: #fff;
+  margin-left: 12rpx;
+}
+
+.like-box-on {
+  background: #4a8f5f;
+  border-color: #4a8f5f;
+}
+
+.like-actions {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 22rpx;
+}
+
+.like-actions .btn {
+  flex: 1;
+  height: 76rpx;
+  font-size: 27rpx;
+}
+
+.like-note {
+  margin-top: 14rpx;
+  font-size: 21rpx;
+  color: #b8aca3;
+  text-align: center;
+}
+
+/* 菜品行 / 看板行上的「👍 N」——参考用，别抢了菜名的注意力 */
+.dish-like {
+  font-size: 20rpx;
+  color: #b06a3c;
+  background: #fdf2e7;
+  border-radius: 8rpx;
+  padding: 2rpx 10rpx;
+  margin-left: 10rpx;
+}
+
+.board-like {
+  font-size: 20rpx;
+  color: #b06a3c;
+  background: #fdf2e7;
+  border-radius: 8rpx;
+  padding: 2rpx 10rpx;
+  margin-left: 10rpx;
+}
+
 .board-empty {
   margin-top: 16rpx;
   font-size: 24rpx;

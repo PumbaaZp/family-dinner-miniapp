@@ -51,6 +51,7 @@
             <view class="board-line">
               <text class="board-name">{{item.name}}</text>
               <text class="board-qty">×{{item.qty}}</text>
+              <text class="board-like" wx:if="{{item.likeText}}">{{item.likeText}}</text>
             </view>
             <view class="board-who" wx:if="{{item.guestsText}}">{{item.guestsText}}</view>
           </view>
@@ -63,6 +64,47 @@
           </view>
         </view>
       </block>
+    </block>
+  </view>
+
+  <!-- 点赞：吃完给今晚的菜投票，每人最多 3 道（不受点单截止影响） -->
+  <view class="like" wx:if="{{inited}}">
+    <view class="like-head" bindtap="onToggleLike">
+      <text class="like-title">👍 给今晚的菜点个赞</text>
+      <text class="like-meta">{{voterCount}} 人参与 · 最多 {{maxVotes}} 道 {{likeOpen ? '收起 ▲' : '展开 ▼'}}</text>
+    </view>
+
+    <view class="like-mine" wx:if="{{myVoteText}}">你已经赞过：{{myVoteText}}</view>
+
+    <block wx:if="{{likeOpen}}">
+      <view class="like-tip">
+        吃完啦？挑最多 {{maxVotes}} 道你觉得最好吃的（已选 {{pickCount}}/{{maxVotes}}）。主人下次家宴就知道该做什么了。
+      </view>
+
+      <view class="like-empty" wx:if="{{!voteList.length}}">
+        今晚还没有人点菜，等大家点完再来投票吧。
+      </view>
+
+      <view
+        class="like-row {{item.picked ? 'like-row-on' : ''}}"
+        wx:for="{{voteList}}"
+        wx:key="dishId"
+        data-id="{{item.dishId}}"
+        bindtap="onTapVote"
+      >
+        <text class="like-emoji">{{item.emoji}}</text>
+        <view class="like-main">
+          <view class="like-name">{{item.name}}</view>
+          <view class="like-sub">{{item.ordered ? '今晚点了 ×' + item.qty : '菜单上的菜'}}<text wx:if="{{item.likeCount}}"> · 已有 {{item.likeCount}} 人赞</text></view>
+        </view>
+        <view class="like-box {{item.picked ? 'like-box-on' : ''}}">{{item.picked ? '✓' : ''}}</view>
+      </view>
+
+      <view class="like-actions">
+        <view class="btn btn-ghost" wx:if="{{myVotes.length}}" bindtap="onClearVotes">撤销我的赞</view>
+        <view class="btn btn-primary" bindtap="onSubmitVotes">提交点赞（{{pickCount}}/{{maxVotes}}）</view>
+      </view>
+      <view class="like-note">可以随时改，重新提交会覆盖上一次。</view>
     </block>
   </view>
 
@@ -98,6 +140,7 @@
         <view class="dish-name">
           {{item.name}}
           <text class="dish-limit" wx:if="{{item.limit}}">限 {{item.limit}} 份</text>
+          <text class="dish-like" wx:if="{{item.likeText}}">{{item.likeText}}</text>
         </view>
         <view class="dish-desc" wx:if="{{item.desc}}">{{item.desc}}</view>
         <view class="dish-tags" wx:if="{{item.tags.length}}">
