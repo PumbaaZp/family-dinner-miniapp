@@ -1845,22 +1845,43 @@ async function loadPages() {
       pickCtx.calls.length === 1 && pickCtx.calls[0].id === 's2' && pickCtx.calls[0].silent === true,
       JSON.stringify(pickCtx.calls));
 
-    /* 场次标签的渲染（我参加过的 + 当前场次） */
-    const sessCtx = {
-      data: {
-        dinners: [
-          { sessionId: 's2', no: 2, name: '中秋家宴', current: true, voted: false },
-          { sessionId: 'party', no: 1, name: '周末家宴', current: false, voted: true }
-        ],
-        voteSessionId: 'party'
-      },
+    /* 场次标签的数据映射：拿**真实的 myDinners 返回**过一遍 ——
+       接口里字段叫 id、模板里用 sessionId，这一层不映射就会出现"标签点不动"
+       （名字显示得出来，但 data-id 是空的，点了什么都不发生）。 */
+    const dinnerRes = await call('myDinners', {}, 'openid_repeat_guest'); // 上面那位两场都露过面的客人
+    const dinnerVm = loaded.index.mapDinners(dinnerRes.data.dinners);
+    expect('点赞页：场次标签的 id 映射没丢（接口的 id → 模板用的 sessionId）',
+      dinnerRes.data.dinners.length === 2 &&
+        dinnerVm.every((d) => !!d.sessionId) &&
+        dinnerVm.map((d) => d.sessionId).join() === dinnerRes.data.dinners.map((d) => d.id).join(),
+      JSON.stringify({ 接口: dinnerRes.data.dinners.map((d) => d.id), 标签: dinnerVm.map((d) => d.sessionId) }));
+    expect('点赞页：每个场次标签的 key 都唯一（不能全是 undefined）',
+      new Set(dinnerVm.map((d) => d.sessionId)).size === dinnerVm.length,
+      JSON.stringify(dinnerVm.map((d) => d.sessionId)));
+    expect('点赞页：标签里既有历史那场、也有"进行中"那一场',
+      dinnerVm.some((d) => d.sessionId === 'party') && dinnerVm.filter((d) => d.current).length === 1,
+      JSON.stringify(dinnerVm.map((d) => d.sessionId + (d.current ? '(进行中)' : ''))));
+    expect('点赞页：标签的字段一个都没丢（id/no/name/current/voted 照原样过来）',
+      dinnerVm.map((d) => [d.sessionId, d.no, d.name, d.current, d.voted].join('|')).join() ===
+        dinnerRes.data.dinners.map((d) => [d.id, d.no, d.name, !!d.current, !!d.voted].join('|')).join(),
+      JSON.stringify({ 接口: dinnerRes.data.dinners, 标签: dinnerVm }));
+
+    /* 真的点一下那个历史场次的标签：要带着 party 去拉那一场的票 */
+    const chipCtx = {
+      data: { voteSessionId: dinnerVm.filter((d) => d.current)[0].sessionId, voteCandidates: [] },
+      calls: [],
       setData(d) {
         Object.assign(this.data, d);
+      },
+      async loadVotes(silent, id) {
+        this.calls.push({ silent: silent, id: id });
       }
     };
-    expect('点赞页：场次标签带唯一 key（sessionId）',
-      new Set(sessCtx.data.dinners.map((d) => d.sessionId)).size === 2);
-    expect('点赞页：默认选中"我参加过的某一场"时能标出已投', sessCtx.data.dinners[1].voted === true);
+    chipCtx.onPickSession = loaded.index.onPickSession;
+    chipCtx.onPickSession.call(chipCtx, { currentTarget: { dataset: { id: 'party' } } });
+    expect('点赞页：点「历史那一场」的标签 → 真的带 sessionId=party 去拉票',
+      chipCtx.calls.length === 1 && chipCtx.calls[0].id === 'party',
+      JSON.stringify(chipCtx.calls));
   }
 
   if (loaded.dashboard) {

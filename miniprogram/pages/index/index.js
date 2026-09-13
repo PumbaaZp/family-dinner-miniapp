@@ -264,12 +264,34 @@ Page({
     }
   },
 
+  /**
+   * 「我参加过的场次」→ 场次标签的渲染数据
+   *
+   * 必须过这一道。接口的场次描述里字段叫 `id`，模板里用的是 `sessionId`：
+   * 以前把接口数据直接塞进 data，结果标签上的 `{{item.sessionId}}` 全是 undefined ——
+   * 名字照样显示得出来（那是 `name`），但**点上去什么都不发生**（`data-id` 是空的），
+   * 于是"没法切换到以前那一场"。这类"字段名对不上"的问题模板里看不出来，
+   * 所以统一在这里映射一次，并且有测试拿**真实的接口返回**过一遍这个函数。
+   */
+  mapDinners(list) {
+    return (list || []).map((d) => ({
+      sessionId: (d && (d.id || d.sessionId)) || '',
+      no: Number(d && d.no) || 0,
+      name: (d && d.name) || '家宴',
+      current: !!(d && d.current),
+      voted: !!(d && d.voted),
+      ordered: !!(d && d.ordered),
+      voteCount: Number(d && d.voteCount) || 0,
+      voteNames: (d && d.voteNames) || []
+    }));
+  },
+
   /** 我参加过哪些场次（点过单或投过票的），当前这一场永远在里面 */
   async loadDinners() {
     try {
       const res = await api.call('myDinners');
       const cur = (res.current && res.current.id) || '';
-      const patch = { dinners: res.dinners || [], currentSessionId: cur };
+      const patch = { dinners: this.mapDinners(res.dinners), currentSessionId: cur };
       if (!this.data.voteSessionId) patch.voteSessionId = cur;
       this.setData(patch);
     } catch (err) {
