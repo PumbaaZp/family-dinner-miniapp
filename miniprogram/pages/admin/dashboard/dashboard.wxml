@@ -60,6 +60,7 @@
 
     <view class="hint" wx:if="{{isCurrentView}}">不做的菜点右侧「不做」：会从所有人的订单里去掉它，并自动下架。</view>
     <view class="hint" wx:else>这是「{{sessionText}}」的历史记录，只看不改；要改请先回到当前这一场。</view>
+    <view class="hint">「几 人点」比「几份」重要：一桌人各点各的，实际做一份就行，做多少由你定（下面的份数只是参考）。</view>
 
     <view class="dt" wx:for="{{dishTotals}}" wx:key="dishId">
       <text class="dt-emoji">{{item.emoji}}</text>
@@ -72,7 +73,7 @@
         <view class="dt-guests" wx:if="{{item.guestsText}}">{{item.guestsText}}</view>
         <view class="dt-note" wx:for="{{item.notes}}" wx:for-item="n" wx:key="*this">↳ {{n}}</view>
       </view>
-      <view class="dt-qty">×{{item.qty}}</view>
+      <view class="dt-qty">{{item.guests.length}} 人点<text class="dt-qty-sub">共 {{item.qty}} 份</text></view>
       <view class="dt-drop" wx:if="{{isCurrentView}}" catchtap="onDropDish" data-id="{{item.dishId}}" data-name="{{item.name}}">不做</view>
     </view>
 

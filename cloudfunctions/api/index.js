@@ -559,27 +559,19 @@ async function handleSubmitOrder(openid, event) {
     dishMap[d._id] = d;
   });
 
-  // 别人已经点掉的份数（用于限量校验）
-  const orderRes = await db.collection('orders').limit(MAX_LIMIT).get();
-  const usedByOthers = {};
-  (orderRes.data || []).forEach((o) => {
-    if (o._openid === openid) return;
-    (o.items || []).forEach((i) => {
-      usedByOthers[i.dishId] = (usedByOthers[i.dishId] || 0) + (Number(i.qty) || 0);
-    });
-  });
-
+  // 限量只看**你自己**点了几份，不看别人点了多少。
+  //
+  // 为什么改：一桌人各点各的，实际备餐都是"一份"，分量由主人自己拿主意。
+  // 按"所有人加起来"卡的话，前面两个人各点 2 份就把后面的挡在门外了
+  // （"只剩 0 份了"），而主人本来也没打算照份数做。所以 limit 的语义是
+  // **每个客人对这道菜最多点几份**，多人点同一道菜不会再互相挤掉。
   for (const it of items) {
     const dish = dishMap[it.dishId];
     if (!dish) throw new Error('菜品不存在：' + (it.name || it.dishId));
     if (!dish.available) throw new Error(dish.name + ' 已经下架了');
     const limit = dish.limit === null || dish.limit === undefined ? 0 : Number(dish.limit);
-    if (limit > 0) {
-      const used = usedByOthers[it.dishId] || 0;
-      if (used + it.qty > limit) {
-        const left = Math.max(0, limit - used);
-        throw new Error(dish.name + (left > 0 ? ' 只剩 ' + left + ' 份了' : ' 已经被点完了'));
-      }
+    if (limit > 0 && it.qty > limit) {
+      throw new Error(dish.name + ' 一个人最多点 ' + limit + ' 份');
     }
     it.name = dish.name;
     it.emoji = dish.emoji || '🍽';
@@ -1106,12 +1098,13 @@ async function handleVotes(openid, event) {
   const sessionOrders = pickSession(orderRes.data, wantId);
   const mine = sessionVotes.filter((v) => v._openid === openid)[0];
   const started = sessionStarted(orderRes.data, wantId);
+  // 「我参加过这一场」= 这一场有我的点单，或者我这一场已经投过票（那样才改得动、撤得掉）
+  const participated = !!mine || sessionOrders.some((o) => o._openid === openid);
 
   const totals = buildLikeTotals(sessionVotes, dishRes.data);
   const totalsAll = buildLikeTotals(votes, dishRes.data);
   const likeMap = likeMapOf(totals);
   const myVotes = mine ? (mine.items || []).map((i) => i.dishId) : [];
-  const participated = isCurrent || !!mine || sessionOrders.some((o) => o._openid === openid);
 
   return ok({
     session: session,
@@ -1119,6 +1112,7 @@ async function handleVotes(openid, event) {
     isCurrent: isCurrent,
     // 开席了吗：没开席就没什么可投的，客户端会显示"等大家点完菜再来投票"
     started: started,
+    participated: participated,
     canVote: started && participated,
     myVotes: myVotes,
     myVoteNames: mine ? (mine.items || []).map((i) => i.name) : [],
@@ -1150,7 +1144,6 @@ async function handleSubmitVotes(openid, event) {
 
   const cur = sessionOf(cfg);
   const sessionId = str(event.sessionId, 32) || cur.id;
-  const isCurrent = sessionId === cur.id;
 
   const [dishRes, orderRes, votes] = await Promise.all([
     db.collection('dishes').limit(MAX_LIMIT).get(),
@@ -1158,8 +1151,11 @@ async function handleSubmitVotes(openid, event) {
     readVotes()
   ]);
   const mine = pickSession(votes, sessionId).filter((v) => v._openid === openid)[0];
-  const participated = isCurrent || !!mine || pickSession(orderRes.data, sessionId).some((o) => o._openid === openid);
-  if (!participated) throw new Error('这一场家宴你没参加过，投不了票');
+  const ordered = pickSession(orderRes.data, sessionId).some((o) => o._openid === openid);
+  // 只有**参加过这一场**的人能投票：这一场有你的点单，或者你这一场已经有票（那样才改得动、撤得掉）。
+  // 不再允许"只要是当前场次谁都能投" —— 主人自己开的场、或者你根本没到场的那一场，都投不了。
+  const participated = !!mine || ordered;
+  if (!participated) throw new Error('这一场家宴你没参加过（这一场没有你的点单），投不了票');
   // 没开席（这一场还没有任何人点单）就不能投——不然主人一建好下一场，朋友就能提前把票投了。
   //
   // 唯一的例外：**你这一场已经有票了**。那种票是"没开席时投进去的"（早先版本留下的误投，
@@ -1292,6 +1288,86 @@ async function handleNewSession(openid, event) {
     session: { id: id, no: no, name: name, ts: ts, current: true },
     sessions: sessions.length
   });
+}
+
+/**
+ * 按菜名猜分类（只用来**建议**，主人确认后才真的改）
+ *
+ * 为什么需要它：像「热菜」这种分类太宽泛（红烧肉、清蒸鲈鱼、可乐鸡翅都能塞进去），
+ * 主人想收拾掉它，就得把底下十几道菜一道道想"该归哪类"——很烦。
+ * 这里按菜名的关键词给个建议，主人看一眼改几个就完事。
+ *
+ * 顺序有讲究：先判"是什么"（鱼/虾蟹/猪/鸡），再判"怎么做"（汤羹/主食/甜品/饮品）。
+ * 反过来的话「可乐鸡翅」会被"可乐"判成饮品、「糖醋排骨」会被"糖"判成甜品。
+ */
+const CATEGORY_HINTS = [
+  ['鱼类', ['鱼']],
+  ['贝蟹虾', ['虾', '蟹', '蛤', '蛏', '淡菜', '贝', '螺', '蚝', '牡蛎', '鱿', '墨鱼', '海参', '鲍']],
+  ['猪肉', ['猪', '排骨', '五花', '蹄', '肘', '里脊', '腊肉', '香肠', '火腿', '肉末', '肉']],
+  ['鸡肉', ['鸡', '鸭', '鹅', '翅', '腿']],
+  ['汤羹', ['汤', '羹', '粥', '煲']],
+  ['主食', ['饭', '面', '粉', '年糕', '饺', '馍', '饼', '馒头', '米线', '馄饨']],
+  ['甜品', ['甜', '奶', '豆花', '糖', '布丁', '糕']],
+  ['饮品', ['茶', '可乐', '雪碧', '汽水', '咖啡', '酒', '汁']],
+  ['蔬菜', ['菜', '瓜', '茄', '豆', '笋', '藕', '萝卜', '土豆', '菇', '菌', '豆腐', '椒', '番茄', '西红柿', '葱']],
+  ['快手菜', ['蛋', '速冻', '泡面', '罐头', '午餐肉']]
+];
+
+function suggestCategory(name) {
+  const n = String(name || '');
+  for (const pair of CATEGORY_HINTS) {
+    if (pair[1].some((k) => n.indexOf(k) >= 0)) return pair[0];
+  }
+  return '';
+}
+
+/**
+ * 把某个分类整体挪走（用来干掉「热菜」这类太宽泛 / 重复的分类）
+ *
+ * event.from   要收拾的分类（必填）
+ * event.to     目标分类；不传就按菜名自动归类（每道菜各自一个建议）
+ * event.dryRun 只出方案不动数据（前端先给主人看一遍）
+ *
+ * 返回 plan = [{ id, name, to }]，主人确认后再跑一次（dryRun 关掉）即可。
+ */
+async function handleMergeCategory(openid, event) {
+  await requireAdmin(openid);
+  const from = str(event && event.from, 20);
+  const to = str(event && event.to, 20);
+  const dryRun = !!(event && event.dryRun);
+  if (!from) throw new Error('缺少要整理的分类');
+  if (to && to === from) throw new Error('目标和原来一样，不用整理');
+
+  const res = await db.collection('dishes').limit(MAX_LIMIT).get();
+  const targets = (res.data || []).filter((d) => (d.category || '自定义') === from);
+  if (!targets.length) return ok({ from: from, to: to, moved: 0, dryRun: dryRun, plan: [], unmapped: [] });
+
+  // 算出每道菜的目标分类：指定了 to 就全去 to，否则逐个按菜名建议；建议不出来的留在原分类
+  const plan = [];
+  const unmapped = [];
+  targets.forEach((d) => {
+    const dest = to || suggestCategory(d.name);
+    if (!dest) {
+      unmapped.push(d.name);
+      return;
+    }
+    plan.push({ id: d._id, name: d.name, to: dest });
+  });
+
+  if (dryRun || !plan.length) {
+    return ok({ from: from, to: to, moved: plan.length, dryRun: true, plan: plan, unmapped: unmapped });
+  }
+
+  for (let i = 0; i < plan.length; i += 10) {
+    const chunk = plan.slice(i, i + 10);
+    await Promise.all(chunk.map((p) => db.collection('dishes').doc(p.id).update({ data: { category: p.to } })));
+  }
+
+  const byTo = {};
+  plan.forEach((p) => {
+    byTo[p.to] = (byTo[p.to] || 0) + 1;
+  });
+  return ok({ from: from, to: to, moved: plan.length, dryRun: false, plan: plan, byTo: byTo, unmapped: unmapped });
 }
 
 /** 后厨看板汇总（仅主人） */
@@ -1653,6 +1729,8 @@ exports.main = async (event) => {
         return await handleNewSession(openid, event);
       case 'renameSession':
         return await handleRenameSession(openid, event);
+      case 'mergeCategory':
+        return await handleMergeCategory(openid, event);
       default:
         return fail('未知操作：' + action);
     }

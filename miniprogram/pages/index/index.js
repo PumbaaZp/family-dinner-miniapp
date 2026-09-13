@@ -3,6 +3,11 @@ const fmt = require('../../utils/format.js');
 
 const app = getApp();
 
+/** 虚拟分类「招牌」：点赞数前三的菜（不是真的菜分类，只是菜单上的一个筛选视图） */
+const TOP_CAT = '招牌';
+const TOP_N = 3;
+const TOP_HINT = '按大家点赞数选出来的前三道（跨场次累计）——不知道点什么就照这个点';
+
 Page({
   data: {
     loading: true,
@@ -16,6 +21,10 @@ Page({
     dishes: [],
     cats: [{ name: '全部', count: 0 }],
     activeCat: '全部',
+    // 分类筛选时给一句说明（目前只有「招牌」用）
+    catHint: '',
+    // 点赞数没读出来时给一句明确的话（原来是静默的，界面看起来像"数据丢了"）
+    likeFail: false,
     // 吸顶栏"当前高亮"的分类。和 activeCat（用于过滤列表）分开：
     // 滚动联动只改高亮，不能改过滤——否则滚到猪肉后随便点个 +，列表会突然只剩猪肉
     viewCat: '全部',
@@ -311,23 +320,33 @@ Page({
       const maxVotes = Number(res.maxVotes) || 3;
       this.pickVotes = (res.myVotes || []).slice(0, maxVotes);
       this.resetLikeDelta(); // 以服务端数据为准，清掉本地的乐观加减票
-      this.setData({
+      const patch = {
         voteSessionId: (res.session && res.session.id) || '',
         voteSession: res.session || null,
         isCurrentVote: !!res.isCurrent,
         // 开席了吗：这一场还没人点过单 → 不显示可投列表（免得下一场还没开始就被投票）
         voteStarted: res.started !== false,
+        // 我参加过这一场吗（这一场有我的点单 / 我已经投过）——没参加就投不了
+        voteJoined: res.participated !== false,
         voteCandidates: res.candidates || [],
         myVotes: res.myVotes || [],
         myVoteText: (res.myVoteNames || []).join('、'),
         voterCount: Number(res.voterCount) || 0,
         maxVotes: maxVotes,
         likeMap: res.likeMap || {},
-        likeMapAll: res.likeMapAll || {}
-      });
+        likeMapAll: res.likeMapAll || {},
+        likeFail: false
+      };
+      // 「招牌」这个分类是拿点赞数算出来的，点赞数一变，分类标签也要跟着重算，
+      // 否则要等下一次刷新菜单才会冒出来。
+      if (this.data.dishes.length) patch.cats = this.buildCats(this.data.dishes);
+      this.setData(patch);
       this.buildVoteList();
       if (this.data.dishes.length) this.buildShown(); // 菜品行上的 👍N 要跟着刷新
     } catch (err) {
+      // 这里失败过就别再静默了：菜品行上的 👍N 会一起消失，看起来像"数据丢了"。
+      // 留一句话在页面上，点菜的人才知道可以下拉刷新。
+      this.setData({ likeFail: true });
       if (!silent) api.toastErr(err);
     }
   },
@@ -368,6 +387,10 @@ Page({
    */
   onTapVote(e) {
     const id = e.currentTarget.dataset.id;
+    // 没参加过这一场就别发请求了（服务端也会拒，这里给一句人话）。
+    // 用 === false 判：老版本云函数不返回 participated 时按"能投"处理，
+    // 真正的把关在服务端，客户端这层只是省一次往返 + 给个提示。
+    if (this.data.voteJoined === false) return api.toast('这一场没有你的点单，投不了票');
     const max = this.data.maxVotes || 3;
     const pick = (this.pickVotes || []).slice();
     const at = pick.indexOf(id);
@@ -585,9 +608,17 @@ Page({
 
   /**
    * 分类标签数据。带上"这一类有几道菜"——标签上有数字，才更像导航而不是一排装饰。
+   *
+   * 另外插一个**虚拟分类「招牌」**：跨场次点赞数前三的菜（只在当前菜单里挑）。
+   * 它是"视图"不是真分类 —— 菜本身还留在自己的分类里，所以：
+   *   - `全部` 的分组标题仍按真实分类来（滚动联动不受影响）；
+   *   - 招牌菜数量为 0（没人赞过）时不显示这个标签，不摆一个空分类在导航里。
    */
   buildCats(dishes) {
     const cats = [{ name: '全部', count: dishes.length }];
+    const top = this.topLiked(dishes);
+    if (top.length) cats.push({ name: TOP_CAT, count: top.length, top: true });
+
     const index = {};
     dishes.forEach((d) => {
       if (!index[d.category]) {
@@ -599,8 +630,29 @@ Page({
     return cats;
   },
 
+  /**
+   * 招牌菜 = 当前菜单里**跨场次点赞数最高的前三道**（点赞数相同时按菜名稳定排序）
+   *
+   * 用跨场次累计而不是本场：本场通常是"吃完才投"，点菜那一刻基本还是 0。
+   */
+  topLiked(dishes, n) {
+    const like = this.data.likeMapAll || {};
+    const max = Number(n) || TOP_N;
+    return (dishes || [])
+      .filter((d) => (like[d._id] || 0) > 0)
+      .sort((a, b) => (like[b._id] || 0) - (like[a._id] || 0) || String(a.name).localeCompare(String(b.name)))
+      .slice(0, max);
+  },
+
   /** 一个菜品 → 一行渲染数据 */
   dishRow(d) {
+    // 点赞数：主数是**跨场次累计**（"来过三次都说好"），本场有票时再补一句，
+    // 免得点菜的人以为"这个数字跟我这一场没关系"。
+    const all = (this.data.likeMapAll || {})[d._id] || 0;
+    const cur = (this.data.likeMap || {})[d._id] || 0;
+    let likeText = '';
+    // 本场票数是累计的一部分：两个数一样时就不再重复写一遍
+    if (all) likeText = '👍 ' + all + ' 人赞' + (cur > 0 && cur !== all ? ' · 本场 ' + cur : '');
     return {
       key: 'd:' + d._id,
       type: 'dish',
@@ -611,8 +663,7 @@ Page({
       category: d.category,
       tags: d.tags || [],
       limit: d.limit,
-      // 多少人点赞（**跨场次累计**：来过三次都说好的菜，新朋友一眼就看得到）
-      likeText: (this.data.likeMapAll || {})[d._id] ? '👍 ' + this.data.likeMapAll[d._id] : '',
+      likeText: likeText,
       qty: this.cart[d._id] || 0,
       note: this.notes[d._id] || ''
     };
@@ -657,6 +708,9 @@ Page({
         shown.push({ key: 'h:' + cat, type: 'header', name: cat, count: byCat[cat].length });
         byCat[cat].forEach((d) => shown.push(this.dishRow(d)));
       });
+    } else if (activeCat === TOP_CAT) {
+      // 招牌菜：虚拟分类，按点赞数排（不再按分类分组，所以这里不产生分组标题）
+      this.topLiked(dishes).forEach((d) => shown.push(this.dishRow(d)));
     } else {
       dishes.filter((d) => d.category === activeCat).forEach((d) => shown.push(this.dishRow(d)));
     }
@@ -666,7 +720,7 @@ Page({
 
     // 合计必须按整个购物车算：只算当前分类的话，切到别的分类底部会错误显示"已点 0 道"
     const cartCount = Object.keys(this.cart).reduce((s, id) => s + (this.cart[id] || 0), 0);
-    this.setData({ shown, cartCount }, () => this.measureSections());
+    this.setData({ shown, cartCount, catHint: activeCat === TOP_CAT ? TOP_HINT : '' }, () => this.measureSections());
   },
 
   /* -------------------- 交互 -------------------- */

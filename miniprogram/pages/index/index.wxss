@@ -423,6 +423,42 @@
   color: #fff;
 }
 
+/* 「招牌」那个虚拟分类：给它一点金色，一眼看出它跟普通分类不是一回事 */
+.cat-top {
+  background: #fff8e6;
+  border: 2rpx solid #f0d9a0;
+}
+
+.cat-top .cat-name {
+  color: #a9761a;
+  font-weight: 600;
+}
+
+.cat-top.cat-on {
+  background: #b8860b;
+  border-color: #b8860b;
+}
+
+.cat-top.cat-on .cat-name {
+  color: #fff;
+}
+
+.cat-top.cat-on .cat-count {
+  color: #fff;
+}
+
+/* 分类筛选时的说明句（招牌菜那句、以及点赞数读不出来时的提示） */
+.cat-hint {
+  margin: 12rpx 4rpx 0;
+  font-size: 24rpx;
+  color: #8a7b70;
+  line-height: 1.5;
+}
+
+.cat-hint-bad {
+  color: #b06a3c;
+}
+
 /* 分组标题：选「全部」时每类菜前面一条，避免所有菜连成一片 */
 .cat-head {
   display: flex;

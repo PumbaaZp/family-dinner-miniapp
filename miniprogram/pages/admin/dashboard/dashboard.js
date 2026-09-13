@@ -309,7 +309,10 @@ Page({
       lines.push('');
       lines.push('【' + cat + '】');
       g.byCat[cat].forEach((t) => {
-        lines.push('· ' + t.name + ' ×' + t.qty);
+        // 「几人点」比「几份」有用：一桌人各点各的，实际做一份就行，分量主人自己定。
+        // 拿不到人数（老数据 / 别处调进来的）就退回原来的 ×N 写法，别显示成"0 人点"。
+        const people = (t.guests || []).length;
+        lines.push('· ' + t.name + (people ? '（' + people + ' 人点 · 共 ' + t.qty + ' 份）' : ' ×' + t.qty));
         const ing = t.ingredients || [];
         lines.push('   食材：' + (ing.length ? ing.join('、') : '（还没配食材）'));
       });

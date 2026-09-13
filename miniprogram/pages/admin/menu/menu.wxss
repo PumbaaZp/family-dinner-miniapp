@@ -55,6 +55,35 @@
   margin-top: 8rpx;
 }
 
+/* 分类整理面板 */
+.tidy {
+  margin-top: 20rpx;
+  padding: 22rpx;
+  background: #faf7f3;
+  border-radius: 16rpx;
+  border: 2rpx solid #efe6dc;
+}
+
+.tidy-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #574a42;
+  margin-bottom: 8rpx;
+}
+
+.tidy-plan {
+  margin: 16rpx 0;
+  padding: 16rpx 18rpx;
+  background: #fff;
+  border-radius: 12rpx;
+  font-size: 24rpx;
+  color: #6b5b50;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  max-height: 460rpx;
+  overflow-y: auto;
+}
+
 .actions .btn {
   flex: 1;
   font-size: 27rpx;

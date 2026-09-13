@@ -97,17 +97,18 @@
       </scroll-view>
 
       <view class="like-tip">
-        <block wx:if="{{!voteStarted}}">这一场还没开席（还没有人点单）——等大家点完菜、开饭之后再来投票吧。</block>
+        <block wx:if="{{!voteJoined}}">这一场没有你的点单，所以投不了票 —— 参加过的场次才能点赞（想让主人帮你点一份也行）。</block>
+        <block wx:elif="{{!voteStarted}}">这一场还没开席（还没有人点单）——等大家点完菜、开饭之后再来投票吧。</block>
         <block wx:elif="{{isCurrentVote}}">点一下就直接记上，最多 {{maxVotes}} 道（已选 {{pickCount}}/{{maxVotes}}）；再点一下取消。主人下次家宴就知道该做什么了。</block>
         <block wx:else>这是「{{voteSession.name}}」那一场的菜单，点一下就改，只影响这一场。</block>
       </view>
 
       <view class="like-mine" wx:if="{{myVoteText}}">你在这一场赞过：{{myVoteText}}</view>
       <view class="like-hint {{voteHintBad ? 'like-hint-bad' : ''}}" wx:if="{{voteHint}}">{{voteHint}}</view>
-      <view class="like-hint like-hint-link" wx:if="{{voteStarted && pickCount && !nick}}" bindtap="onSetVoteNick">主人看不到是谁赞的 —— 点这里留个名字 ›</view>
+      <view class="like-hint like-hint-link" wx:if="{{voteJoined && voteStarted && pickCount && !nick}}" bindtap="onSetVoteNick">主人看不到是谁赞的 —— 点这里留个名字 ›</view>
 
       <view class="like-empty" wx:if="{{!voteList.length}}">
-        {{voteStarted ? '这一场还没有人点菜，等大家点完再来投票吧。' : '这一场还没开席，等有人点菜之后再来投票。'}}
+        {{!voteJoined ? '这一场没有你的点单，所以这里没有可投的菜。' : (voteStarted ? '这一场还没有人点菜，等大家点完再来投票吧。' : '这一场还没开席，等有人点菜之后再来投票。')}}
       </view>
 
       <view
@@ -136,18 +137,21 @@
   <view class="cats-wrap" wx:if="{{dishes.length > 1}}">
     <scroll-view class="cats" scroll-x enable-flex scroll-with-animation scroll-into-view="{{catScrollInto}}">
       <view
-        class="cat {{viewCat === item.name ? 'cat-on' : ''}}"
+        class="cat {{viewCat === item.name ? 'cat-on' : ''}} {{item.top ? 'cat-top' : ''}}"
         id="cat-{{index}}"
         wx:for="{{cats}}"
         wx:key="name"
         data-cat="{{item.name}}"
         bindtap="onCat"
       >
-        <text class="cat-name">{{item.name}}</text>
+        <text class="cat-name">{{item.top ? '👑 ' : ''}}{{item.name}}</text>
         <text class="cat-count">{{item.count}}</text>
       </view>
     </scroll-view>
   </view>
+
+  <view class="cat-hint" wx:if="{{catHint}}">{{catHint}}</view>
+  <view class="cat-hint cat-hint-bad" wx:if="{{likeFail}}">点赞数没读出来（可能是云函数还没重新部署），下拉刷新试试</view>
 
   <!-- 菜品列表（"全部"时按分类分组，中间有分组标题） -->
   <block wx:for="{{shown}}" wx:key="key">
@@ -255,6 +259,8 @@
     <view class="field-label">整体备注（可选）</view>
     <input class="input" value="{{note}}" placeholder="例如：有一位不吃香菜，孩子怕辣" bindinput="onNoteInput" />
   </view>
+
+  <view class="sheet-sub">想吃的点上就行，别人点过也照样点 —— 做多少主人来定。</view>
 
   <view class="sheet-actions">
     <view class="btn" bindtap="onCloseSubmit">再想想</view>

@@ -32,7 +32,17 @@ Page({
     editing: null,
     editForm: { name: '', desc: '', emoji: '', ingredients: '', tags: '' },
     editCatIndex: 0,
-    catOptions: []
+    catOptions: [],
+    // 分类整理（把「热菜」这类太宽泛的分类收拾掉）
+    tidyOpen: false,
+    tidyCats: [],
+    tidyFromIndex: 0,
+    tidyFrom: '',
+    tidyOptions: [],
+    tidyToIndex: 0,
+    tidyTo: '',
+    tidyPlan: '',
+    tidyBusy: false
   },
 
   onLoad() {
@@ -164,6 +174,113 @@ Page({
 
   goPantry() {
     wx.navigateTo({ url: '/pages/admin/pantry/pantry' });
+  },
+
+  /* ---------- 分类整理（合并 / 拆到更具体的分类） ---------- */
+
+  /**
+   * 打开「分类整理」面板
+   *
+   * 用途：把太宽泛的分类收拾掉。典型是「热菜」—— 红烧肉、清蒸鲈鱼、可乐鸡翅
+   * 都能算热菜，跟"猪肉/鱼类/鸡肉"这些分类重复，点菜时要划半天。
+   * 点一下这个分类，就能把底下的菜一次挪走（可以整体挪到一个分类，
+   * 也可以按菜名自动归类），挪完那个分类自己就消失了。
+   */
+  onTidyCategories() {
+    const cats = this.catStats();
+    if (cats.length < 2) return api.toast('现在只有一个分类，没什么好整理的');
+    this.setData({
+      tidyOpen: true,
+      tidyCats: cats,
+      tidyFromIndex: 0,
+      tidyFrom: cats[0].name,
+      tidyOptions: ['按菜名自动归类'].concat(cats.map((c) => c.name)).filter((n) => n !== cats[0].name),
+      tidyToIndex: 0,
+      tidyTo: '',
+      tidyPlan: '',
+      tidyBusy: false
+    });
+    this.previewTidy();
+  },
+
+  /** 每个分类有几道菜（整理面板的第一级选择；带 label 是给 picker 显示的） */
+  catStats() {
+    const map = {};
+    const order = [];
+    (this.all || []).forEach((d) => {
+      const c = d.category || '自定义';
+      if (!map[c]) {
+        map[c] = { name: c, label: c, count: 0, on: 0 };
+        order.push(c);
+      }
+      map[c].count += 1;
+      if (d.available) map[c].on += 1;
+    });
+    return order.map((c) => {
+      map[c].label = c + '（' + map[c].count + ' 道，已上架 ' + map[c].on + '）';
+      return map[c];
+    });
+  },
+
+  onTidyFromChange(e) {
+    const i = Number(e.detail.value) || 0;
+    const from = this.data.tidyCats[i] ? this.data.tidyCats[i].name : '';
+    const options = ['按菜名自动归类'].concat(this.data.tidyCats.map((c) => c.name)).filter((n) => n !== from);
+    this.setData({ tidyFromIndex: i, tidyFrom: from, tidyOptions: options, tidyToIndex: 0, tidyTo: '' });
+    this.previewTidy(from, '');
+  },
+
+  onTidyToChange(e) {
+    const i = Number(e.detail.value) || 0;
+    const to = i === 0 ? '' : this.data.tidyOptions[i];
+    this.setData({ tidyToIndex: i, tidyTo: to });
+    this.previewTidy(this.data.tidyFrom, to);
+  },
+
+  /** 先出方案给主人看一眼（dryRun，不动数据） */
+  async previewTidy(from, to) {
+    const f = from === undefined ? this.data.tidyFrom : from;
+    const t = to === undefined ? this.data.tidyTo : to;
+    if (!f) return;
+    this.setData({ tidyBusy: true });
+    try {
+      const res = await api.call('mergeCategory', { from: f, to: t || '', dryRun: true });
+      const lines = (res.plan || []).map((p) => '· ' + p.name + ' → ' + p.to);
+      const head = res.plan && res.plan.length
+        ? '把「' + f + '」下的 ' + res.plan.length + ' 道菜挪走：'
+        : '「' + f + '」里没有能自动归类的菜（可以手动选一个目标分类）';
+      const tail = (res.unmapped || []).length ? '\n\n没建议（会留在原分类）：' + res.unmapped.join('、') : '';
+      this.setData({ tidyPlan: head + '\n\n' + lines.join('\n') + tail, tidyBusy: false });
+    } catch (err) {
+      this.setData({ tidyBusy: false, tidyPlan: '' });
+      api.toastErr(err);
+    }
+  },
+
+  onTidyCancel() {
+    this.setData({ tidyOpen: false, tidyPlan: '' });
+  },
+
+  /** 真的动数据：整理完刷新菜库 */
+  async onTidyConfirm() {
+    const from = this.data.tidyFrom;
+    const to = this.data.tidyTo;
+    if (!from) return;
+    const ok = await api.confirm(
+      '把「' + from + '」下的菜' + (to ? '全部挪到「' + to + '」' : '按菜名自动归类') + '？\n\n只改分类，菜名、食材、上架状态都不动。'
+    );
+    if (!ok) return;
+    api.loading('整理中');
+    try {
+      const res = await api.call('mergeCategory', { from: from, to: to || '' });
+      api.hideLoading();
+      this.setData({ tidyOpen: false, tidyPlan: '' });
+      await this.load();
+      api.toast('已挪走 ' + res.moved + ' 道菜');
+    } catch (err) {
+      api.hideLoading();
+      api.toastErr(err);
+    }
   },
 
   /** 点菜名旁边的"缺 N 样"，看具体缺哪几样 */

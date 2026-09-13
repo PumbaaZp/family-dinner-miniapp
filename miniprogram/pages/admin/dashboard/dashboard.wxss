@@ -91,6 +91,15 @@
   font-weight: 700;
   color: #c9401f;
   flex: none;
+  text-align: right;
+}
+
+/* 备餐量由主人定，份数只作参考，所以排成第二行小字 */
+.dt-qty-sub {
+  display: block;
+  font-size: 20rpx;
+  font-weight: 400;
+  color: #a99d95;
 }
 
 /* 「不做」按钮：从所有订单里去掉这道菜 */

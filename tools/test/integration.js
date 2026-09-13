@@ -282,12 +282,22 @@ async function runBackend() {
 
   // 候选名单是"今晚点过的菜 ∪ 上架的菜"，所以先把点过的这件事造出来。
   // 用临时 openid 下单，块末尾撤销——不影响后面真正下单那些测试。
+  //
+  // 注意：**投票必须由"参加过这一场"的人来投**（这一场有他的点单或已有票）。
+  // 所以这里用两个临时客人，各自下一单再投票 —— 他们只是"到场了"，不是来测点单的，
+  // 所以下单的量特意压到最小：多的那一单会影响下面"候选名单按份数排"的断言。
   const TMP_VOTER = 'openid_tmp_voter';
+  const TMP_VOTER2 = 'openid_tmp_voter2';
   await call('submitOrder', {
     nick: '临时投票客',
     partySize: 1,
     items: [{ dishId: pick3[0], qty: 2 }, { dishId: pick3[1], qty: 1 }]
   }, TMP_VOTER);
+  await call('submitOrder', {
+    nick: '临时投票客二号',
+    partySize: 1,
+    items: [{ dishId: pick3[1], qty: 1 }]
+  }, TMP_VOTER2);
 
   r = await call('votes', {}, GUEST_B);
   expect('还没人投票时 totals 为空、voterCount 为 0', r.ok && r.data.totals.length === 0 && r.data.voterCount === 0, JSON.stringify(r.data.totals));
@@ -300,27 +310,27 @@ async function runBackend() {
       r.data.candidates[0].dishId === pick3[0] && r.data.candidates[0].qty === 2,
     JSON.stringify(r.data.candidates.slice(0, 3).map((c) => c.name + '×' + c.qty)));
 
-  r = await call('submitVotes', { dishIds: [pick3[0], pick3[1], pick3[2], pick3[0], 'nope'] }, GUEST_B);
+  r = await call('submitVotes', { dishIds: [pick3[0], pick3[1], pick3[2], pick3[0], 'nope'] }, TMP_VOTER);
   expect('投票会去重、并忽略不存在的菜',
     r.ok && r.data.count === 3 && r.data.dishIds.join(',') === pick3.join(','),
     JSON.stringify(r.data));
 
-  r = await call('submitVotes', { dishIds: [pick3[0], pick3[1], pick3[2], onMenu[3]._id] }, GUEST_B);
+  r = await call('submitVotes', { dishIds: [pick3[0], pick3[1], pick3[2], onMenu[3]._id] }, TMP_VOTER);
   expect('超过 3 道会被拒绝（不能偷偷多投）', r.ok === false && /最多/.test(r.msg), r.msg);
 
-  r = await call('votes', {}, GUEST_B);
+  r = await call('votes', {}, TMP_VOTER);
   expect('我投了哪些会回填出来（用于勾选状态）', r.data.myVotes.join(',') === pick3.join(','), JSON.stringify(r.data.myVotes));
   expect('合计里只统计一次（同一道菜不会因重复提交翻倍）',
     r.data.totals.length === 3 && r.data.totals.every((t) => t.count === 1),
     JSON.stringify(r.data.totals.map((t) => t.name + ':' + t.count)));
 
-  r = await call('submitVotes', { dishIds: [pick3[0]] }, GUEST_B);
+  r = await call('submitVotes', { dishIds: [pick3[0]] }, TMP_VOTER);
   expect('重新提交是覆盖，不是累加', r.ok && r.data.count === 1, JSON.stringify(r.data));
-  r = await call('votes', {}, GUEST_B);
+  r = await call('votes', {}, TMP_VOTER);
   expect('覆盖后只剩 1 票', r.data.myVotes.length === 1 && r.data.totals.length === 1, JSON.stringify(r.data.totals));
 
-  await call('submitVotes', { dishIds: pick3 }, GUEST_B);
-  await call('submitVotes', { dishIds: [pick3[0], pick3[1]] }, GUEST_C);
+  await call('submitVotes', { dishIds: pick3 }, TMP_VOTER);
+  await call('submitVotes', { dishIds: [pick3[0], pick3[1]] }, TMP_VOTER2);
   r = await call('votes', {}, HOST);
   expect('多人投票会累加（老王 3 票 + 小李 2 票 → 头名 2 人）',
     r.data.voterCount === 2 && r.data.totals[0].count === 2 && r.data.totals[0].dishId === pick3[0],
@@ -340,17 +350,17 @@ async function runBackend() {
 
   /* 下架之后照样能投票：家宴一结束主人常把菜全下架，而那时才是投票高峰 */
   await call('batchToggle', { available: false }, HOST);
-  r = await call('submitVotes', { dishIds: [pick3[0]] }, GUEST_C);
+  r = await call('submitVotes', { dishIds: [pick3[0]] }, TMP_VOTER2);
   expect('菜全部下架后仍然能点赞（吃完才投票）', r.ok === true, r.msg);
-  r = await call('votes', {}, GUEST_C);
+  r = await call('votes', {}, TMP_VOTER2);
   expect('下架后候选名单还在（来自订单，不会因下架而消失）',
     r.data.candidates.length > 0 && r.data.candidates.filter((c) => c.dishId === pick3[0]).length === 1,
     '候选数=' + r.data.candidates.length);
   await call('batchToggle', { available: true }, HOST);
 
-  r = await call('submitVotes', { dishIds: [] }, GUEST_C);
+  r = await call('submitVotes', { dishIds: [] }, TMP_VOTER2);
   expect('传空数组 = 撤销我的赞（幂等，不报错）', r.ok && r.data.cleared === true && r.data.count === 0, JSON.stringify(r.data));
-  r = await call('submitVotes', { dishIds: [] }, GUEST_C);
+  r = await call('submitVotes', { dishIds: [] }, TMP_VOTER2);
   expect('没有赞的时候再撤一次也不报错', r.ok === true && r.data.cleared === true, JSON.stringify(r.data));
   r = await call('votes', {}, HOST);
   expect('撤销后那个人从合计里消失（剩下的人各 1 票）',
@@ -366,7 +376,7 @@ async function runBackend() {
 
   /* 老环境没建过 votes 集合时，第一次点赞要能自动补建（不能直接报 collection not exists） */
   delete state.collections.votes;
-  r = await call('submitVotes', { dishIds: [pick3[0]] }, GUEST_B);
+  r = await call('submitVotes', { dishIds: [pick3[0]] }, TMP_VOTER);
   expect('votes 集合不存在时自动补建并写入成功', r.ok === true && r.data.count === 1, r.msg);
   expect('补建之后集合真的有了', Array.isArray(state.collections.votes) && state.collections.votes.length === 1,
     JSON.stringify((state.collections.votes || []).length));
@@ -380,8 +390,9 @@ async function runBackend() {
     r.data.config && r.data.config.votes === undefined && r.data.config.voterCount === undefined,
     JSON.stringify(Object.keys(r.data.config || {})));
 
-  /* 撤掉临时投票客的订单，把状态还原给后面的下单测试 */
+  /* 撤掉两位临时投票客的订单，把状态还原给后面的下单测试 */
   await call('cancelOrder', {}, TMP_VOTER);
+  await call('cancelOrder', {}, TMP_VOTER2);
   r = await call('summary', {}, HOST);
   expect('投票测试用的临时订单已撤销（不影响后面的流程）', r.data.stats.orderCount === 0,
     JSON.stringify(r.data.stats));
@@ -419,17 +430,25 @@ async function runBackend() {
   expect('覆盖后只有 1 单', r.data.stats.orderCount === 1, 'orderCount=' + r.data.stats.orderCount);
   expect('覆盖后份数按新单算（2 份）', r.data.stats.totalDishes === 2, 'totalDishes=' + r.data.stats.totalDishes);
 
-  /* --- 限量校验 --- */
-  r = await call('submitOrder', { nick: '小李', partySize: 2, items: [{ dishId: water._id, qty: 3 }] }, GUEST_C);
-  expect('限量校验：超量下单被拒绝', r.ok === false, r.msg);
-  expect('拒绝信息提示剩余份数', /只剩|点完/.test(r.msg || ''), r.msg);
+  /* --- 限量：**按人算**，不按全桌加起来算 ---
+     （实际备餐都是一份、分量主人自己定，所以别人点了几份不该挡着你） */
+  r = await call('submitOrder', { nick: '小李', partySize: 2, items: [{ dishId: water._id, qty: 5 }] }, GUEST_C);
+  expect('一个人点的份数超过限量 → 被拒', r.ok === false, r.msg);
+  expect('提示说的是"一个人最多点几份"（不再是"只剩 N 份"）',
+    /一个人最多点/.test(r.msg || ''), r.msg);
 
   r = await call('submitOrder', { nick: '小李', partySize: 2, items: [{ dishId: water._id, qty: 2 }] }, GUEST_C);
-  expect('限量内下单成功', r.ok === true, r.msg);
+  expect('限量之内下单成功', r.ok === true, r.msg);
+  const bothOrdered = (await call('summary', {}, HOST)).data.dishTotals.filter((t) => t.dishId === water._id)[0];
+  expect('两个人都点了同一道菜：人数记 2、份数照旧相加（供参考）',
+    bothOrdered && bothOrdered.guests.length === 2 && bothOrdered.qty === 4,
+    JSON.stringify({ 人: bothOrdered && bothOrdered.guests, 份: bothOrdered && bothOrdered.qty }));
 
-  /* --- 每人上限：用不限量的菜才能真正测到上限规则 --- */
-  r = await call('submitOrder', { nick: '小李', partySize: 2, items: [{ dishId: water._id, qty: 5 }] }, GUEST_C);
-  expect('超过限量时同样被拒（限量优先于上限）', r.ok === false, r.msg);
+  // 别人已经点满限量，也不影响下一位客人点 —— 这就是"支持多个用户点"
+  const four = await call('submitOrder', { nick: '小王', partySize: 1, items: [{ dishId: water._id, qty: 4 }] }, WIFE);
+  expect('别人点满了也不挡着下一位客人点（按人算限量）',
+    four.ok === true, four.msg);
+  await call('cancelOrder', {}, WIFE);
 
   /* --- 下架校验 --- */
   const salad = (await call('listDishes', { all: true }, HOST)).data.dishes.find((d) => d._id !== water._id);
@@ -722,8 +741,15 @@ async function runBackend() {
 
   r = await call('submitVotes', { dishIds: [dishB._id], sessionId: 'party' }, STRANGER);
   expect('没参加过的场次不能投票', r.ok === false && /没参加/.test(r.msg), r.msg);
+  // 【新规矩】「当前场次」不再是"谁都能投"：没在这一场点过单的人照样投不了
   r = await call('submitVotes', { dishIds: [dishA._id] }, STRANGER);
-  expect('当前这一场：我本人没点单也能投（只要这一场已经开席了）', r.ok === true, r.msg);
+  expect('当前这一场：我没在这一场点过单 → 投不了（只有参加过的人能投）',
+    r.ok === false && /没参加/.test(r.msg), r.msg);
+  r = await call('votes', {}, STRANGER);
+  expect('接口也会告诉我"你没参加这一场"，客户端据此给提示',
+    r.data.participated === false && r.data.canVote === false, JSON.stringify({ p: r.data.participated, c: r.data.canVote }));
+  r = await call('votes', {}, V1);
+  expect('参加过这一场的人不受影响（V1 在这一场点过单）', r.data.participated === true && r.data.canVote === true);
 
   r = await call('resetVotes', { sessionId: 'party' }, GUEST_C);
   expect('非管理员不能清空某一场的点赞', r.ok === false && /权限/.test(r.msg), r.msg);
@@ -824,23 +850,31 @@ async function runBackend() {
   expect('没开席时本场票数为 0（那是"这一场还没人投票"，不是数据丢了）',
     r.data.totals.length === 0 && r.data.voterCount === 0 && r.data.voterCountAll > 0,
     JSON.stringify({ 本场: r.data.voterCount, 累计人次: r.data.voterCountAll }));
+  expect('这一场我没参加过（没我点单）→ 客户端会提示"投不了"',
+    r.data.participated === false, JSON.stringify({ participated: r.data.participated }));
   r = await call('submitVotes', { dishIds: [dishB._id] }, V1);
-  expect('还没开席的那一场：投票被拒，并说清为什么',
-    r.ok === false && /还没开席/.test(r.msg), r.msg);
+  expect('没参加过这一场 → 投票被拒（先于开席判断）',
+    r.ok === false && /没参加/.test(r.msg), r.msg);
 
-  await call('submitOrder', { nick: '先点菜的人', partySize: 2, items: [{ dishId: dishB._id, qty: 1 }] }, 'openid_first_order');
+  // V1 自己下一单：既是"开席"，也是"他参加过这一场"
+  await call('submitOrder', { nick: '这一场我也在', partySize: 2, items: [{ dishId: dishB._id, qty: 1 }] }, V1);
   r = await call('votes', {}, V1);
-  expect('有人点单 = 开席：候选回来了', r.data.started === true && r.data.canVote === true && r.data.candidates.length > 0,
-    JSON.stringify({ started: r.data.started, canVote: r.data.canVote, n: r.data.candidates.length }));
+  expect('点过单 = 参加过 + 开席：候选回来了',
+    r.data.started === true && r.data.participated === true && r.data.canVote === true && r.data.candidates.length > 0,
+    JSON.stringify({ started: r.data.started, joined: r.data.participated, canVote: r.data.canVote, n: r.data.candidates.length }));
   r = await call('submitVotes', { dishIds: [dishB._id] }, V1);
-  expect('开席之后就能投票了', r.ok === true && r.data.session.no === 9, r.msg + ' ' + JSON.stringify(r.data.session));
+  expect('参加过 + 开席之后就能投票了', r.ok === true && r.data.session.no === 9, r.msg + ' ' + JSON.stringify(r.data.session));
+  // 同一个人（这一场没他的单）投不了 —— 这就是"只能点赞自己参加的那一场"
+  r = await call('submitVotes', { dishIds: [dishB._id] }, 'openid_never_joined');
+  expect('同场次的别人没点过单 → 也投不了（不是"当前场次谁都能投"）',
+    r.ok === false && /没参加/.test(r.msg), r.msg);
 
   // 那一单又被撤掉 → 这一场重新变成"没开席"，但我的票还在（这就是"误投"的处境）
-  await call('cancelOrder', {}, 'openid_first_order');
+  await call('cancelOrder', {}, V1);
   r = await call('votes', {}, V1);
-  expect('单被撤掉后又回到"没开席"，但我自己的票仍然看得见',
-    r.data.started === false && r.data.myVotes.length === 1,
-    JSON.stringify({ started: r.data.started, mine: r.data.myVotes }));
+  expect('单被撤掉后又回到"没开席"，但我自己的票仍然看得见（投过也算参加）',
+    r.data.started === false && r.data.participated === true && r.data.myVotes.length === 1,
+    JSON.stringify({ started: r.data.started, joined: r.data.participated, mine: r.data.myVotes }));
   r = await call('submitVotes', { dishIds: [dishA._id] }, V1);
   expect('没开席 + 自己已经有票：允许改（改的是自己那张，不会凭空多出一票）',
     r.ok === true && r.data.count === 1 && r.data.session.no === 9,
@@ -869,6 +903,8 @@ async function runBackend() {
   // 注意用 dishA/dishB（刚查出来的、确实还在菜库里的菜）：
   // pick3 是很早抓的快照，其中一道中途被删了，而 submitVotes 对不存在的菜是静默丢弃的——
   // 那样投出去的会是空数组，等于"撤销"，测出来的现象会完全误导人。
+  // 「小李」这一票要先让他这一场有单：新规矩下没参加过这一场的人投不了票。
+  await call('submitOrder', { nick: '小李', partySize: 1, items: [{ dishId: dishA._id, qty: 1 }] }, STRANGER);
   const voteA = await call('submitVotes', { dishIds: [dishA._id, dishB._id], nick: '老王' }, V1);
   const voteB = await call('submitVotes', { dishIds: [dishA._id], nick: '小李' }, STRANGER);
   expect('准备数据：两个人各自投上了票',
@@ -993,6 +1029,54 @@ async function runBackend() {
   expect('非管理员不能改菜品', r.ok === false && /权限/.test(r.msg), r.msg);
   r = await call('updateDish', { id: customId, patch: {} }, HOST);
   expect('空 patch 会被拒绝', r.ok === false && /字段/.test(r.msg), r.msg);
+
+  /* --- 分类整理：把「热菜」这类太宽泛的分类一次挪走 --- */
+  const tidies = [];
+  for (const one of [
+    { name: '整理用红烧肉', category: '热菜', available: false },
+    { name: '整理用清蒸鲈鱼', category: '热菜', available: false },
+    { name: '整理用乱炖', category: '热菜', available: false }
+  ]) {
+    const add = await call('addDish', one, HOST);
+    tidies.push(add.data._id);
+  }
+  r = await call('mergeCategory', { from: '热菜', dryRun: true }, GUEST_C);
+  expect('非管理员不能整理分类', r.ok === false && /权限/.test(r.msg), r.msg);
+
+  r = await call('mergeCategory', { from: '热菜', dryRun: true }, HOST);
+  expect('整理分类：先出方案不动数据（dryRun）',
+    r.ok && r.data.dryRun === true && r.data.moved === 2,
+    JSON.stringify(r.data.plan));
+  expect('按菜名给建议：红烧肉→猪肉、清蒸鲈鱼→鱼类（猪/鱼 先于"怎么做"判断）',
+    r.data.plan.map((p) => p.name + '→' + p.to).sort().join(',') === '整理用清蒸鲈鱼→鱼类,整理用红烧肉→猪肉',
+    JSON.stringify(r.data.plan));
+  expect('建议不出来的菜留在原分类（不会瞎猜）',
+    r.data.unmapped.join(',') === '整理用乱炖', JSON.stringify(r.data.unmapped));
+  const stillHot = (await call('listDishes', { all: true }, HOST)).data.dishes.filter((d) => d.category === '热菜');
+  expect('dryRun 真的没动数据', stillHot.length === 3, '还在热菜里的=' + stillHot.length);
+
+  r = await call('mergeCategory', { from: '热菜' }, HOST);
+  expect('确认后真的挪走（建议归类）', r.ok && r.data.moved === 2 && r.data.dryRun === false, JSON.stringify(r.data.byTo));
+  const afterOne = (await call('listDishes', { all: true }, HOST)).data.dishes;
+  expect('挪完之后各自在新分类里',
+    afterOne.filter((d) => d.name === '整理用红烧肉')[0].category === '猪肉' &&
+      afterOne.filter((d) => d.name === '整理用清蒸鲈鱼')[0].category === '鱼类',
+    JSON.stringify(afterOne.filter((d) => tidies.indexOf(d._id) >= 0).map((d) => d.name + ':' + d.category)));
+
+  r = await call('mergeCategory', { from: '热菜', to: '其他' }, HOST);
+  expect('剩下没建议的可以整体挪到指定分类', r.ok && r.data.moved === 1 && r.data.plan[0].to === '其他', JSON.stringify(r.data.plan));
+  const afterAll = (await call('listDishes', { all: true }, HOST)).data.dishes;
+  expect('「热菜」这个分类就此消失（菜单里再也没有它）',
+    afterAll.filter((d) => d.category === '热菜').length === 0,
+    JSON.stringify(afterAll.filter((d) => tidies.indexOf(d._id) >= 0).map((d) => d.name + ':' + d.category)));
+
+  r = await call('mergeCategory', { from: '不存在的分类' }, HOST);
+  expect('整理一个空分类：不报错，返回 0 道', r.ok && r.data.moved === 0, JSON.stringify(r.data));
+  r = await call('mergeCategory', { from: '猪肉', to: '猪肉' }, HOST);
+  expect('目标和原来一样 → 直接拒绝（免得白跑一趟）', r.ok === false && /一样/.test(r.msg), r.msg);
+  r = await call('mergeCategory', { to: '其他' }, HOST);
+  expect('没说要整理哪个分类 → 明确提示', r.ok === false && /缺少/.test(r.msg), r.msg);
+  for (const id of tidies) await call('removeDish', { id: id }, HOST);
   await call('removeDish', { id: customId }, HOST);
 }
 
@@ -1148,9 +1232,9 @@ async function loadPages() {
 
   /* 页面方法齐全性 */
   const expectMethods = {
-    index: ['bootstrap', 'buildShown', 'buildCats', 'dishRow', 'spyCat', 'measureSections', 'onPageScroll', 'onPlus', 'onMinus', 'onNote', 'onSubmit', 'onClearCart', 'reloadMenu', 'onInitAsHost', 'goMenu', 'goDashboard', 'onHide', 'onUnload', 'startDeadlineTick', 'stopDeadlineTick', 'onToggleBoard', 'loadBoard', 'mapBoard', 'onToggleLike', 'loadVotes', 'buildVoteList', 'onTapVote', 'saveVotes', 'bumpLike', 'refreshVoteCounts', 'onClearVotes', 'loadDinners', 'mapDinners', 'onPickSession', 'onRetry'],
+    index: ['bootstrap', 'buildShown', 'buildCats', 'topLiked', 'dishRow', 'spyCat', 'measureSections', 'onPageScroll', 'onPlus', 'onMinus', 'onNote', 'onSubmit', 'onClearCart', 'reloadMenu', 'onInitAsHost', 'goMenu', 'goDashboard', 'onHide', 'onUnload', 'startDeadlineTick', 'stopDeadlineTick', 'onToggleBoard', 'loadBoard', 'mapBoard', 'onToggleLike', 'loadVotes', 'buildVoteList', 'onTapVote', 'saveVotes', 'bumpLike', 'refreshVoteCounts', 'onClearVotes', 'loadDinners', 'mapDinners', 'onPickSession', 'onRetry'],
     mine: ['refresh', 'applyOrder', 'onCancel', 'onCopy', 'onBecomeAdmin'],
-    menu: ['load', 'buildGroups', 'onToggleDish', 'onToggleCategory', 'batchAll', 'onLimitEdit', 'onImportSeed', 'onFillIngredients', 'onSaveSettings', 'onClearDeadline', 'onToggleDeadline', 'goPantry', 'onShowCoverage', 'onEditDish', 'onEditInput', 'onEditCatChange', 'onCancelEdit', 'onSaveDish'],
+    menu: ['load', 'buildGroups', 'onToggleDish', 'onToggleCategory', 'batchAll', 'onLimitEdit', 'onImportSeed', 'onFillIngredients', 'onSaveSettings', 'onClearDeadline', 'onToggleDeadline', 'goPantry', 'onShowCoverage', 'catStats', 'onTidyCategories', 'onTidyFromChange', 'onTidyToChange', 'previewTidy', 'onTidyCancel', 'onTidyConfirm', 'onEditDish', 'onEditInput', 'onEditCatChange', 'onCancelEdit', 'onSaveDish'],
     pantry: ['load', 'render', 'putItem', 'onFormInput', 'onCatChange', 'onPickItem', 'onCancelEdit', 'onAdd', 'onRemove', 'onClearAll', 'onToggleQuick', 'onChipFilter', 'onToggleChip', 'onToggleBulk', 'onBulkInput', 'onBulkAdd', 'onRefresh'],
     dashboard: ['load', 'mapOrders', 'mapIngredients', 'mapLikes', 'groupByCat', 'buildMenuText', 'buildDishIngredientText', 'buildShoppingText', 'copyText', 'onCopyMenu', 'onCopyDishIngredient', 'onCopyShopping', 'onToggleIngredient', 'onResetShopping', 'onResetVotes', 'onRenameSession', 'onNewSession', 'previewText', 'onRefresh', 'onShow', 'onHide', 'onUnload', 'startAutoRefresh', 'scheduleRefresh', 'stopAutoRefresh', 'onDropDish', 'onDropOrderItem', 'dropDish', 'onDecItem', 'onEditItemQty', 'setItemQty']
   };
@@ -1421,8 +1505,8 @@ async function loadPages() {
   /* 三种导出（都不含"谁点的"） */
   if (loaded.dashboard) {
     const totals = [
-      { dishId: 'd1', name: '红烧肉', qty: 3, category: '猪肉', guestsText: '老王、小李', ingredients: ['五花肉', '冰糖', '生抽'] },
-      { dishId: 'd2', name: '清炒丝瓜', qty: 1, category: '蔬菜', guestsText: '小李', ingredients: ['丝瓜', '大蒜'] }
+      { dishId: 'd1', name: '红烧肉', qty: 3, category: '猪肉', guests: ['老王', '小李'], guestsText: '老王、小李', ingredients: ['五花肉', '冰糖', '生抽'] },
+      { dishId: 'd2', name: '清炒丝瓜', qty: 1, category: '蔬菜', guests: ['小李'], guestsText: '小李', ingredients: ['丝瓜', '大蒜'] }
     ];
 
     const menuText = loaded.dashboard.buildMenuText({ title: '周末家宴', address: '3 幢 1502' }, totals);
@@ -1432,7 +1516,10 @@ async function loadPages() {
     expect('菜单清单：无人点单/未定菜时不崩', loaded.dashboard.buildMenuText({}, []).indexOf('（还没有确定菜品）') >= 0);
 
     const diText = loaded.dashboard.buildDishIngredientText({ title: '周末家宴' }, totals);
-    expect('菜+食材：每道菜带份数与食材', diText.indexOf('红烧肉 ×3') >= 0 && diText.indexOf('食材：五花肉、冰糖、生抽') >= 0, diText);
+    expect('菜+食材：每道菜带「几人点 · 共几份」和食材',
+      diText.indexOf('红烧肉（2 人点 · 共 3 份）') >= 0 && diText.indexOf('食材：五花肉、冰糖、生抽') >= 0, diText);
+    expect('菜+食材：拿不到人数时退回 ×N 写法（不会显示成"0 人点"）',
+      loaded.dashboard.buildDishIngredientText({}, [{ name: '神秘菜', qty: 2, category: '其他' }]).indexOf('神秘菜 ×2') >= 0);
     expect('菜+食材：没配食材的菜有占位提示',
       loaded.dashboard.buildDishIngredientText({}, [{ name: '神秘菜', qty: 1, category: '其他' }]).indexOf('（还没配食材）') >= 0);
 
@@ -1746,10 +1833,75 @@ async function loadPages() {
 
   /* ---- 点赞：点一下就生效 / 看板点赞榜 ---- */
   if (loaded.index) {
-    expect('点赞页：菜品行上的 👍N 用【跨场次累计】（不然"来过三次都说好"看不出来）',
-      loaded.index.dishRow.call({ cart: {}, notes: {}, data: { likeMap: { d1: 9 }, likeMapAll: { d1: 3 } } }, { _id: 'd1', name: '红烧肉' }).likeText === '👍 3' &&
-        loaded.index.dishRow.call({ cart: {}, notes: {}, data: { likeMapAll: {} } }, { _id: 'd9', name: '没赞过的菜' }).likeText === '',
-      '有人赞显示累计 👍N，没人赞不显示');
+    const rowCtx = (likeMap, likeMapAll) => ({ cart: {}, notes: {}, data: { likeMap: likeMap || {}, likeMapAll: likeMapAll || {} } });
+
+    expect('点菜页：菜名后面写清「人赞」用的是【跨场次累计】',
+      loaded.index.dishRow.call(rowCtx({}, { d1: 3 }), { _id: 'd1', name: '红烧肉' }).likeText === '👍 3 人赞' &&
+        loaded.index.dishRow.call(rowCtx(), { _id: 'd9', name: '没赞过的菜' }).likeText === '',
+      '有人赞显示「👍 N 人赞」，没人赞不显示');
+    expect('点菜页：本场有票时再补一句（免得以为这个数字跟自己这一场无关）',
+      loaded.index.dishRow.call(rowCtx({ d1: 2 }, { d1: 5 }), { _id: 'd1', name: '红烧肉' }).likeText === '👍 5 人赞 · 本场 2' &&
+        loaded.index.dishRow.call(rowCtx({ d1: 5 }, { d1: 5 }), { _id: 'd1', name: '红烧肉' }).likeText === '👍 5 人赞',
+      '本场 2 票时补「· 本场 2」，全部票都在本场时不重复写');
+
+    /* ---- 招牌菜：跨场次点赞前三（虚拟分类，不移动菜品原分类） ---- */
+    const topCtx = {
+      data: {
+        likeMapAll: { d1: 5, d3: 5, d2: 2, d9: 0 },
+        dishes: [],
+        activeCat: '全部'
+      },
+      cart: {},
+      notes: {},
+      setData(d) {
+        Object.assign(this.data, d);
+      },
+      measureSections() {}
+    };
+    topCtx.topLiked = loaded.index.topLiked;
+    topCtx.buildCats = loaded.index.buildCats;
+    topCtx.dishRow = loaded.index.dishRow;
+    topCtx.buildShown = loaded.index.buildShown;
+    const menu = [
+      { _id: 'd1', name: '红烧排骨', category: '猪肉', emoji: '🍖' },
+      { _id: 'd2', name: '清炒丝瓜', category: '蔬菜', emoji: '🥒' },
+      { _id: 'd3', name: '话梅排骨', category: '猪肉', emoji: '🍖' },
+      { _id: 'd4', name: '白灼虾', category: '贝蟹虾', emoji: '🦐' },
+      { _id: 'd9', name: '没赞过的菜', category: '蔬菜', emoji: '🥬' }
+    ];
+    expect('招牌菜：取点赞数前三（点赞数相同的按菜名稳定排序）',
+      topCtx.topLiked.call(topCtx, menu).map((d) => d._id).join(',') === 'd1,d3,d2',
+      JSON.stringify(topCtx.topLiked.call(topCtx, menu).map((d) => d.name)));
+    expect('招牌菜：一票都没有的菜不会混进来',
+      topCtx.topLiked.call(topCtx, menu).every((d) => topCtx.data.likeMapAll[d._id] > 0));
+    expect('招牌菜：只取前三，不会把整本菜单塞进去',
+      topCtx.topLiked.call(topCtx, menu).length === 3);
+
+    topCtx.data.dishes = menu;
+    const cats = topCtx.buildCats.call(topCtx, menu);
+    expect('分类标签：多了「招牌」，排在「全部」后面、真实分类前面',
+      cats[0].name === '全部' && cats[1].name === '招牌' && cats[1].top === true && cats[1].count === 3,
+      JSON.stringify(cats.map((c) => c.name + ':' + c.count)));
+    expect('分类标签：真实分类一个都没少',
+      cats.filter((c) => !c.top).map((c) => c.name).join(',') === '全部,猪肉,蔬菜,贝蟹虾',
+      JSON.stringify(cats.map((c) => c.name)));
+
+    topCtx.data.activeCat = '招牌';
+    topCtx.buildShown.call(topCtx);
+    expect('点「招牌」显示那三道（且**没有**分组标题，因为它不是真分类）',
+      topCtx.data.shown.length === 3 && topCtx.data.shown.every((r) => r.type === 'dish') &&
+        topCtx.data.shown.map((r) => r._id).join(',') === 'd1,d3,d2',
+      JSON.stringify(topCtx.data.shown.map((r) => r.name)));
+    expect('点「招牌」时给一句说明（这三道是怎么来的）',
+      /点赞数/.test(topCtx.data.catHint || '') && /前三/.test(topCtx.data.catHint || ''), JSON.stringify(topCtx.data.catHint));
+
+    topCtx.data.activeCat = '猪肉';
+    topCtx.buildShown.call(topCtx);
+    expect('切回普通分类：说明句消失、列表回到该类',
+      topCtx.data.catHint === '' && topCtx.data.shown.length === 2, JSON.stringify({ hint: topCtx.data.catHint, n: topCtx.data.shown.length }));
+
+    expect('一票都没有时：不显示「招牌」这个空分类',
+      topCtx.buildCats.call({ data: { likeMapAll: {} }, topLiked: loaded.index.topLiked }, menu).map((c) => c.name).join(',') === '全部,猪肉,蔬菜,贝蟹虾');
 
     /* 点一下就生效：没有提交按钮，点完立刻发请求 */
     const voteCtx = {
@@ -1779,6 +1931,14 @@ async function loadPages() {
     voteCtx.pickVotes = [];
 
     const tapVote = (id) => voteCtx.onTapVote.call(voteCtx, { currentTarget: { dataset: { id: id } } });
+
+    // 没参加过这一场的人：点一下不该发请求（服务端也会拒，客户端先拦一道并给提示）
+    const joined = voteCtx.data.voteJoined;
+    voteCtx.data.voteJoined = false;
+    tapVote('d1');
+    expect('点赞：没参加过这一场的人点不动，也不会发请求',
+      voteCtx.saved.length === 0 && !voteCtx.data.pickCount, JSON.stringify({ saved: voteCtx.saved, pick: voteCtx.data.pickCount }));
+    voteCtx.data.voteJoined = joined;
 
     tapVote('d1');
     tapVote('d2');
