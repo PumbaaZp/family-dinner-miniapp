@@ -27,6 +27,16 @@ function mapError(errMsg) {
 }
 
 /**
+ * 云函数调用的兜底超时（毫秒）。
+ *
+ * 为什么必须有：真机在不稳定网络下，`wx.cloud.callFunction` 有时**既不回调 success
+ * 也不回调 fail**（请求就悬在那里）。没有兜底的话，页面会永远停在"正在加载…"，
+ * 用户看到的就是"小程序打不开了"——而且刷新、重进都没用。
+ * 宁可给一句明确的错误，也不要无限转圈。
+ */
+const CALL_TIMEOUT_MS = 20000;
+
+/**
  * 统一调用云函数 api
  * resolve 时返回 result.data，reject 时抛出带中文 message 的 Error
  */
@@ -36,20 +46,36 @@ function call(action, data) {
       reject(new Error('当前环境不支持云开发：请把调试基础库调到 2.2.3 以上'));
       return;
     }
+
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error('请求超时：网络可能不稳定，下拉刷新或重试一下'));
+    }, CALL_TIMEOUT_MS);
+
+    // 成功/失败/超时，只认第一个到达的（云函数偶发会重复回调）
+    const once = (fn) => (arg) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(arg);
+    };
+
     wx.cloud.callFunction({
       name: config.cloudFunctionName,
       data: Object.assign({ action: action }, data || {}),
-      success(res) {
+      success: once((res) => {
         const r = (res && res.result) || {};
         if (r.ok) {
           resolve(r.data);
         } else {
           reject(new Error(r.msg || '操作失败'));
         }
-      },
-      fail(err) {
+      }),
+      fail: once((err) => {
         reject(new Error(mapError(err && err.errMsg)));
-      }
+      })
     });
   });
 }
@@ -102,4 +128,4 @@ function hideLoading() {
   wx.hideLoading();
 }
 
-module.exports = { call, mapError, toast, toastErr, confirm, prompt, loading, hideLoading };
+module.exports = { call, mapError, toast, toastErr, confirm, prompt, loading, hideLoading, CALL_TIMEOUT_MS };

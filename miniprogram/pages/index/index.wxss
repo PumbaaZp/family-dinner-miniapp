@@ -41,6 +41,31 @@
   line-height: 1.5;
 }
 
+/* 连不上服务器：红一点的提示条 + 右侧重试 */
+.banner-err {
+  margin-top: 20rpx;
+  background: #fdecea;
+  color: #c0392b;
+  border-radius: 16rpx;
+  padding: 20rpx 24rpx;
+  font-size: 26rpx;
+  line-height: 1.5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.banner-retry {
+  flex: none;
+  margin-left: 20rpx;
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #fff;
+  background: #c0392b;
+  border-radius: 999rpx;
+  padding: 8rpx 24rpx;
+}
+
 /* 大家都在点什么（朋友之间互相可见） */
 .board {
   background: #fff;

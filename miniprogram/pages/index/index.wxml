@@ -22,6 +22,12 @@
     <view class="btn btn-primary" style="margin-top:24rpx" bindtap="onInitAsHost">我是主人，一键开通</view>
   </view>
 
+  <!-- 连不上服务器：把原因留在页面上，并且给一个重试按钮（真机网络不稳时不至于一片空白） -->
+  <view class="banner-err" wx:if="{{errText}}">
+    ⚠️ {{errText}}
+    <text class="banner-retry" bindtap="onRetry">重试</text>
+  </view>
+
   <!-- 已截止提示 -->
   <view class="banner-closed" wx:if="{{inited && closed}}">
     ⏰ 点单已截止（{{deadlineText}}），如需修改请直接联系主人

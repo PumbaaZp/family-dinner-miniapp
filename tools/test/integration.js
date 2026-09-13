@@ -990,7 +990,7 @@ async function loadPages() {
 
   /* 页面方法齐全性 */
   const expectMethods = {
-    index: ['bootstrap', 'buildShown', 'buildCats', 'dishRow', 'spyCat', 'measureSections', 'onPageScroll', 'onPlus', 'onMinus', 'onNote', 'onSubmit', 'onClearCart', 'reloadMenu', 'onInitAsHost', 'goMenu', 'goDashboard', 'onHide', 'onUnload', 'startDeadlineTick', 'stopDeadlineTick', 'onToggleBoard', 'loadBoard', 'mapBoard', 'onToggleLike', 'loadVotes', 'buildVoteList', 'onTapVote', 'onSubmitVotes', 'onClearVotes'],
+    index: ['bootstrap', 'buildShown', 'buildCats', 'dishRow', 'spyCat', 'measureSections', 'onPageScroll', 'onPlus', 'onMinus', 'onNote', 'onSubmit', 'onClearCart', 'reloadMenu', 'onInitAsHost', 'goMenu', 'goDashboard', 'onHide', 'onUnload', 'startDeadlineTick', 'stopDeadlineTick', 'onToggleBoard', 'loadBoard', 'mapBoard', 'onToggleLike', 'loadVotes', 'buildVoteList', 'onTapVote', 'onSubmitVotes', 'onClearVotes', 'loadDinners', 'onPickSession', 'onRetry'],
     mine: ['refresh', 'applyOrder', 'onCancel', 'onCopy', 'onBecomeAdmin'],
     menu: ['load', 'buildGroups', 'onToggleDish', 'onToggleCategory', 'batchAll', 'onLimitEdit', 'onImportSeed', 'onFillIngredients', 'onSaveSettings', 'onClearDeadline', 'onToggleDeadline', 'goPantry', 'onShowCoverage', 'onEditDish', 'onEditInput', 'onEditCatChange', 'onCancelEdit', 'onSaveDish'],
     pantry: ['load', 'render', 'putItem', 'onFormInput', 'onCatChange', 'onPickItem', 'onCancelEdit', 'onAdd', 'onRemove', 'onClearAll', 'onToggleQuick', 'onChipFilter', 'onToggleChip', 'onToggleBulk', 'onBulkInput', 'onBulkAdd', 'onRefresh'],
@@ -1690,6 +1690,51 @@ async function loadPages() {
       likes.map((l) => l.barPercent).join(','));
     expect('看板点赞榜：每项有唯一 key', new Set(likes.map((l) => l.key)).size === 3);
     expect('看板点赞榜：空数据不崩', loaded.dashboard.mapLikes([]).length === 0 && loaded.dashboard.mapLikes(undefined).length === 0);
+  }
+
+  /* 真机网络不稳时：云函数调用既不 success 也不 fail 也不能永远转圈 */
+  {
+    const apiUtil = require(path.join(ROOT, 'miniprogram', 'utils', 'api.js'));
+    const savedCloud = global.wx.cloud;
+    const realSetTimeout = global.setTimeout;
+    const realClearTimeout = global.clearTimeout;
+
+    global.wx.cloud = { init() {}, callFunction() { /* 故意谁都不回调 */ } };
+    // 把定时器换成"立即触发"，这样不用真等 20 秒
+    global.setTimeout = function (fn) {
+      realSetTimeout(fn, 0);
+      return 0;
+    };
+    global.clearTimeout = function () {};
+
+    try {
+      await apiUtil.call('whoami');
+      bad('云函数悬着不回调时应该有超时兜底', '居然 resolve 了');
+    } catch (e) {
+      expect('云函数悬着不回调 → 20 秒超时兜底，给出能照做的提示', /超时/.test(e.message), e.message);
+    } finally {
+      global.wx.cloud = savedCloud;
+      global.setTimeout = realSetTimeout;
+      global.clearTimeout = realClearTimeout;
+    }
+
+    // 重复回调（success 之后再 fail）不能把已经 resolve 的结果改掉，也不能报错
+    global.wx.cloud = {
+      init() {},
+      callFunction(opts) {
+        opts.success({ result: { ok: true, data: { openid: 'x' } } });
+        opts.fail({ errMsg: 'boom' });
+        opts.success({ result: { ok: false, msg: 'late' } });
+      }
+    };
+    try {
+      const data = await apiUtil.call('whoami');
+      expect('云函数重复回调只认第一个（不会反复 resolve/reject）', data.openid === 'x', JSON.stringify(data));
+    } catch (e) {
+      bad('云函数重复回调只认第一个', e.message);
+    } finally {
+      global.wx.cloud = savedCloud;
+    }
   }
 
   /* 报错翻译：部署期最容易撞到的几类失败，必须给人能照做的提示 */

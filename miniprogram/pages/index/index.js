@@ -9,6 +9,8 @@ Page({
     inited: false,
     isAdmin: false,
     cfg: null,
+    // 连不上服务器时的错误文案：留在页面上，配一个「重试」
+    errText: '',
     deadlineText: '',
     closed: false,
     dishes: [],
@@ -373,7 +375,7 @@ Page({
     this.setData({ loading: true });
     try {
       const session = await app.ensureSession(!!force);
-      this.setData({ isAdmin: !!session.isAdmin });
+      this.setData({ isAdmin: !!session.isAdmin, errText: '' });
 
       if (!session.inited) {
         this.setData({ loading: false, inited: false, cfg: null, dishes: [], shown: [], cartCount: 0 });
@@ -402,9 +404,17 @@ Page({
       }
     } catch (err) {
       this._loaded = true;
-      this.setData({ loading: false });
+      // 关键：一定要把 loading 关掉，并且把错误**留在页面上**。
+      // 真机网络不稳定时，以前这里只有一条一闪而过的 toast，朋友看到的是
+      // "一片空白 / 一直转圈"，根本不知道发生了什么、也不知道能重试。
+      this.setData({ loading: false, errText: (err && err.message) || '加载失败' });
       api.toastErr(err);
     }
+  },
+
+  /** 页面上那个「重试」（连不上服务器时用） */
+  onRetry() {
+    this.bootstrap(true);
   },
 
   applyConfig(cfg) {
