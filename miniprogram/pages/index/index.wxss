@@ -178,6 +178,12 @@
   color: #c0392b;
 }
 
+/* 「留个名字」：主人要靠昵称才知道是谁赞的 */
+.like-hint-link {
+  color: #c9401f;
+  text-decoration: underline;
+}
+
 .like-empty {
   margin-top: 16rpx;
   font-size: 24rpx;

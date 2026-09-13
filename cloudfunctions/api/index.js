@@ -864,12 +864,15 @@ async function readVotes() {
 }
 
 /**
- * 点赞汇总 → [{ dishId, name, emoji, count }]，按人数降序。
+ * 点赞汇总 → [{ dishId, name, emoji, count, who? }]，按人数降序。
  *
  * 一人一份票（重复提交即覆盖自己的），所以 count 就是「有多少人推荐这道菜」，
  * 同一个人反复来吃也不会把票数刷上去——这比累计历史点赞更适合当"下次点什么"的参考。
+ *
+ * withWho = true 时额外带上 `who: [{ name, count }]`（谁赞的）。
+ * **只有主人端才允许带**：朋友端拿到的是同一份数据的"无姓名版"。
  */
-function buildLikeTotals(voteDocs, dishDocs) {
+function buildLikeTotals(voteDocs, dishDocs, nickIndex, withWho) {
   const dishMap = {};
   (dishDocs || []).forEach((d) => {
     dishMap[d._id] = d;
@@ -877,6 +880,7 @@ function buildLikeTotals(voteDocs, dishDocs) {
 
   const index = {};
   (voteDocs || []).forEach((v) => {
+    const voter = withWho ? voterNameOf(v, nickIndex) : '';
     (v.items || []).forEach((it) => {
       if (!it || !it.dishId) return;
       if (!index[it.dishId]) {
@@ -888,14 +892,54 @@ function buildLikeTotals(voteDocs, dishDocs) {
           emoji: dish.emoji || it.emoji || '🍽',
           count: 0
         };
+        if (withWho) index[it.dishId].who = [];
       }
       index[it.dishId].count += 1;
+      if (withWho) index[it.dishId].who.push(voter);
     });
   });
 
-  return Object.keys(index)
+  const list = Object.keys(index)
     .map((k) => index[k])
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+
+  // 一个人可能在好几场都赞了同一道菜：合并成「老王×2」，不然名单里会出现两个老王
+  list.forEach((t) => {
+    if (!withWho) return;
+    const merged = [];
+    (t.who || []).forEach((n) => {
+      const hit = merged.filter((m) => m.name === n)[0];
+      if (hit) hit.count += 1;
+      else merged.push({ name: n, count: 1 });
+    });
+    merged.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    t.who = merged;
+  });
+
+  return list;
+}
+
+/**
+ * { 'sessionId|openid': 昵称 }
+ *
+ * 老点赞记录里**没有存昵称**（这一版才加的），所以拿"他那一场的点单昵称"补上；
+ * 连订单都没有的（只投票没点菜），就只能算匿名了。
+ */
+function buildNickIndex(orderDocs) {
+  const m = {};
+  (orderDocs || []).forEach((o) => {
+    if (!o || !o._openid) return;
+    m[sessionIdOf(o) + '|' + o._openid] = str(o.nick, 20) || '匿名朋友';
+  });
+  return m;
+}
+
+/** 一条点赞记录是谁赞的：优先用它自己存的昵称（快照），否则回退到那一场的订单昵称 */
+function voterNameOf(voteDoc, nickIndex) {
+  const own = str(voteDoc && voteDoc.nick, 20);
+  if (own) return own;
+  const key = sessionIdOf(voteDoc) + '|' + ((voteDoc && voteDoc._openid) || '');
+  return (nickIndex || {})[key] || '匿名朋友';
 }
 
 /** [{ dishId, count }] → { dishId: count }，给菜品行直接取用 */
@@ -1111,6 +1155,8 @@ async function handleSubmitVotes(openid, event) {
     sessionId: sessionId,
     sessionNo: label.no,
     sessionName: label.name,
+    // 存下提交时的昵称快照：主人要靠它看出"这道菜是谁赞的"
+    nick: str(event.nick, 20) || '匿名朋友',
     items: items,
     updatedAt: db.serverDate()
   };
@@ -1226,8 +1272,10 @@ async function handleSummary(openid) {
   const orders = pickSession(orderRes.data, session.id);
   const sessionVotes = pickSession(votes, session.id);
 
-  const likes = buildLikeTotals(sessionVotes, dishRes.data);
-  const likesAll = buildLikeTotals(votes, dishRes.data);
+  // 主人端能看到"是谁赞的"，所以这两处 buildLikeTotals 都带 withWho
+  const nickIndex = buildNickIndex(orderRes.data);
+  const likes = buildLikeTotals(sessionVotes, dishRes.data, nickIndex, true);
+  const likesAll = buildLikeTotals(votes, dishRes.data, nickIndex, true);
   const data = aggregateOrders(cfg, orders, dishRes.data, true, likeMapOf(likes));
   const ingredients = buildIngredients(dishRes.data, orders, cfg.shopping || {}, cfg.pantry || {});
   const pantry = pantryList(cfg);

@@ -138,7 +138,7 @@
     </view>
 
     <block wx:if="{{likes.length}}">
-      <view class="hint">本场（{{sessionText}}）：一人最多 3 道，重复提交会覆盖。</view>
+      <view class="hint">本场（{{sessionText}}）：一人最多 3 道，重复提交会覆盖。名字就是他点单时用的称呼。</view>
       <view class="lk" wx:for="{{likes}}" wx:key="key">
         <text class="lk-rank">{{item.medal || item.rank}}</text>
         <text class="lk-emoji">{{item.emoji}}</text>
@@ -148,6 +148,7 @@
             <text class="lk-count">{{item.count}} 人赞</text>
           </view>
           <view class="lk-bar"><view class="lk-bar-in" style="width:{{item.barPercent}}%"></view></view>
+          <view class="lk-who" wx:if="{{item.whoText}}">{{item.whoText}}</view>
         </view>
       </view>
     </block>
@@ -159,7 +160,7 @@
       <text>🏆 累计榜（跨场次）</text>
       <text class="muted">{{likeStats.votersAll}} 人次</text>
     </view>
-    <view class="hint">去过几次就投几次票——"来过三次都说好"比单场第一更有说服力。下次挑菜看这张。</view>
+    <view class="hint">去过几次就投几次票——"来过三次都说好"比单场第一更有说服力。名字后面带 ×N 表示他赞过 N 次。下次挑菜看这张。</view>
 
     <view class="lk" wx:for="{{likesAll}}" wx:key="key">
       <text class="lk-rank">{{item.medal || item.rank}}</text>
@@ -170,6 +171,7 @@
           <text class="lk-count">{{item.count}} 票</text>
         </view>
         <view class="lk-bar"><view class="lk-bar-in" style="width:{{item.barPercent}}%"></view></view>
+        <view class="lk-who" wx:if="{{item.whoText}}">{{item.whoText}}</view>
       </view>
     </view>
 

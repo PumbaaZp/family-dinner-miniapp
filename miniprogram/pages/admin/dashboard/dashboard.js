@@ -213,20 +213,27 @@ Page({
     });
   },
 
-  /** 点赞榜 → 渲染数据（前几名给个名次，方便下次照着做） */
+  /** 点赞榜 → 渲染数据（前几名给个名次，方便下次照着做；并列出"是谁赞的"） */
   mapLikes(rawList) {
     const total = (rawList || []).length;
-    return (rawList || []).map((l, idx) => ({
-      key: 'like:' + l.dishId,
-      rank: idx + 1,
-      dishId: l.dishId,
-      name: l.name,
-      emoji: l.emoji || '🍽',
-      count: Number(l.count) || 0,
-      medal: idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '',
-      // 第一名的条给满宽，其余按比例——一眼看出差距，也不用 canvas
-      barPercent: total ? Math.round((Number(l.count) || 0) / (Number(rawList[0].count) || 1) * 100) : 0
-    }));
+    const top = Number(rawList && rawList[0] ? rawList[0].count : 0) || 1;
+    return (rawList || []).map((l, idx) => {
+      const who = l.who || [];
+      const shown = who.slice(0, 6).map((w) => (w.count > 1 ? w.name + '×' + w.count : w.name));
+      return {
+        key: 'like:' + l.dishId,
+        rank: idx + 1,
+        dishId: l.dishId,
+        name: l.name,
+        emoji: l.emoji || '🍽',
+        count: Number(l.count) || 0,
+        // 「是谁赞的」：名单太长就折起来，别把卡片撑爆
+        whoText: shown.join('、') + (who.length > 6 ? ' 等 ' + who.length + ' 人（人次）' : ''),
+        medal: idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '',
+        // 第一名的条给满宽，其余按比例——一眼看出差距，也不用 canvas
+        barPercent: total ? Math.round(((Number(l.count) || 0) / top) * 100) : 0
+      };
+    });
   },
 
   /** 把菜品按分类分组（三种导出都用得上） */

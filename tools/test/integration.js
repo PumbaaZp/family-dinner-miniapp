@@ -763,6 +763,62 @@ async function runBackend() {
   r = await call('myDinners', {}, V1);
   expect('换场之后，客人仍然能看到并回到旧场次', r.data.dinners.filter((d) => d.no === 1).length === 1);
 
+  /* --- 主人能看到"这道菜是谁赞的" --- */
+  // 注意用 dishA/dishB（刚查出来的、确实还在菜库里的菜）：
+  // pick3 是很早抓的快照，其中一道中途被删了，而 submitVotes 对不存在的菜是静默丢弃的——
+  // 那样投出去的会是空数组，等于"撤销"，测出来的现象会完全误导人。
+  const voteA = await call('submitVotes', { dishIds: [dishA._id, dishB._id], nick: '老王' }, V1);
+  const voteB = await call('submitVotes', { dishIds: [dishA._id], nick: '小李' }, STRANGER);
+  expect('准备数据：两个人各自投上了票',
+    voteA.ok && voteA.data.count === 2 && voteB.ok && voteB.data.count === 1,
+    JSON.stringify({ a: voteA.data, b: voteB.data, dishA: dishA.name, dishB: dishB.name }));
+
+  r = await call('summary', {}, HOST);
+  const liked = r.data.likes.filter((l) => l.dishId === dishA._id)[0];
+  expect('主人端点赞榜带出「是谁赞的」',
+    !!liked && Array.isArray(liked.who) && liked.who.map((w) => w.name).sort().join(',') === '小李,老王',
+    JSON.stringify({ who: liked && liked.who, likes: r.data.likes.map((l) => l.name) }));
+  expect('「是谁赞的」里同一个人只出现一次（合并成 ×N）',
+    !!liked && liked.who.every((w) => w.count >= 1) &&
+      new Set(liked.who.map((w) => w.name)).size === liked.who.length,
+    JSON.stringify(liked && liked.who));
+
+  r = await call('board', {}, GUEST_C);
+  expect('朋友端拿不到"是谁赞的"（隐私：只给人数，不给名字）',
+    r.data.likes.every((l) => l.who === undefined) && JSON.stringify(r.data).indexOf('"who"') < 0,
+    JSON.stringify(r.data.likes[0]));
+  r = await call('votes', {}, GUEST_C);
+  expect('朋友端的点赞接口也不带名字（totals / totalsAll / candidates 都没有）',
+    r.data.totals.every((t) => t.who === undefined) &&
+      r.data.totalsAll.every((t) => t.who === undefined) &&
+      r.data.candidates.every((c) => c.who === undefined) &&
+      JSON.stringify(r.data).indexOf('"who"') < 0,
+    JSON.stringify(r.data.totals[0]));
+
+  /* 同一个人两场都赞同一道菜：累计榜里合并成 ×2，而不是出现两个同名条目 */
+  await call('submitVotes', { dishIds: [dishB._id], nick: '老王', sessionId: 'party' }, V1);
+  r = await call('summary', {}, HOST);
+  const multi = r.data.likesAll.filter((l) => l.dishId === dishB._id)[0];
+  expect('累计榜里同一个人两场都赞 → 合并成一条 ×2',
+    !!multi && multi.who.filter((w) => w.name === '老王').length === 1 &&
+      multi.who.filter((w) => w.name === '老王')[0].count === 2,
+    JSON.stringify(multi && multi.who));
+
+  /* 老点赞记录没存昵称：用"他那一场的点单昵称"兜底 */
+  state.collections.votes.push({
+    _id: 'legacy_vote_1',
+    _openid: V1,
+    sessionId: 'party',
+    items: [{ dishId: dishB._id, name: dishB.name, emoji: '🍽' }]
+  });
+  r = await call('summary', {}, HOST);
+  const legacyRow = r.data.likesAll.filter((l) => l.dishId === dishB._id)[0];
+  expect('老点赞记录（没有昵称）用他那一场的点单昵称兜底，不显示成匿名',
+    !!legacyRow && legacyRow.who.some((w) => w.name === '老客人'),
+    JSON.stringify(legacyRow && legacyRow.who));
+
+  await call('resetVotes', {}, HOST);
+
   /* --- 改场次名字（"本次家宴名称"） --- */
   r = await call('renameSession', { name: '0913场家宴' }, GUEST_C);
   expect('非管理员不能改场次名字', r.ok === false && /权限/.test(r.msg), r.msg);
@@ -1655,7 +1711,10 @@ async function loadPages() {
       _serverVotes: [],
       loadDinners() {},
       toastErr() {},
-      refreshVoteCounts() {}
+      refreshVoteCounts() {},
+      myNick() {
+        return '老王';
+      }
     };
     failCtx.buildVoteList = loaded.index.buildVoteList;
     failCtx.onTapVote = loaded.index.onTapVote;

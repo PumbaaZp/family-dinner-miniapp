@@ -103,6 +103,7 @@
 
       <view class="like-mine" wx:if="{{myVoteText}}">你在这一场赞过：{{myVoteText}}</view>
       <view class="like-hint {{voteHintBad ? 'like-hint-bad' : ''}}" wx:if="{{voteHint}}">{{voteHint}}</view>
+      <view class="like-hint like-hint-link" wx:if="{{pickCount && !nick}}" bindtap="onSetVoteNick">主人看不到是谁赞的 —— 点这里留个名字 ›</view>
 
       <view class="like-empty" wx:if="{{!voteList.length}}">
         这一场还没有人点菜，等大家点完再来投票吧。

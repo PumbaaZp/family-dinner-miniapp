@@ -369,6 +369,30 @@ Page({
     this.likeDelta = delta;
   },
 
+  /** 我的昵称：点单时填过的会存在本地，投票时带上，主人就知道是谁赞的 */
+  myNick() {
+    return String(this.data.nick || wx.getStorageSync('nick') || '').trim();
+  },
+
+  /**
+   * 留个名字（投票卡上那个小提示）
+   *
+   * 刻意**不在投票时弹窗问名字**：点赞是"点一下就完事"的动作，弹个框会打断手感。
+   * 所以改成不拦：没名字也能投，卡片上给一条"主人看不到是谁赞的，点这里留个名字"。
+   */
+  async onSetVoteNick() {
+    const cur = this.myNick();
+    const input = await api.prompt('留个名字，主人就知道是你赞的', '你叫什么', cur || '老王');
+    if (input === null) return;
+    const nick = String(input).trim().slice(0, 20);
+    if (!nick) return api.toast('名字不能为空');
+    wx.setStorageSync('nick', nick);
+    this.setData({ nick: nick });
+    // 已经投过的票补上名字（重新提交一次即可）
+    if ((this.pickVotes || []).length) this.saveVotes();
+    else api.toast('记下了：' + nick, 'success');
+  },
+
   /**
    * 把当前勾选写回云端
    *
@@ -387,7 +411,12 @@ Page({
       do {
         this._voteDirty = false;
         const ids = (this.pickVotes || []).slice();
-        const res = await api.call('submitVotes', { dishIds: ids, sessionId: this.data.voteSessionId });
+        const res = await api.call('submitVotes', {
+          dishIds: ids,
+          sessionId: this.data.voteSessionId,
+          // 带上昵称，主人才能看出"这道菜是谁赞的"（没名字也能投，只是主人看到的是匿名）
+          nick: this.myNick()
+        });
         // 以服务端确认的结果为准（它可能丢掉不存在的菜）
         this.pickVotes = (res.dishIds || []).slice();
         this._serverVotes = this.pickVotes.slice();

@@ -235,6 +235,14 @@
   color: #2e7d5b;
 }
 
+/* 「是谁赞的」：名字多了会换行，别撑破卡片 */
+.lk-who {
+  margin-top: 8rpx;
+  font-size: 21rpx;
+  color: #a99d95;
+  line-height: 1.5;
+}
+
 .lk-bar {
   margin-top: 10rpx;
   height: 12rpx;
